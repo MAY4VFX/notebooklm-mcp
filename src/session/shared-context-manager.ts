@@ -177,9 +177,11 @@ export class SharedContextManager {
     const browserLocale = CONFIG.uiLocale === 'fr' ? 'fr-FR' : 'en-US';
     const browserTimezone = CONFIG.uiLocale === 'fr' ? 'Europe/Paris' : 'America/New_York';
 
+    const proxyServer = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
     const launchOptions = {
       headless: shouldBeHeadless,
       ...(CONFIG.browserChannel === 'chrome' && { channel: 'chrome' as const }),
+      ...(proxyServer && { proxy: { server: proxyServer } }),
       viewport: CONFIG.viewport,
       locale: browserLocale,
       timezoneId: browserTimezone,

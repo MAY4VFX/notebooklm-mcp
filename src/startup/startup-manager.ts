@@ -323,9 +323,11 @@ export class StartupManager {
 
     try {
       const browserLocale = CONFIG.uiLocale === 'fr' ? 'fr-FR' : 'en-US';
+      const proxyServer = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
       context = await chromium.launchPersistentContext(CONFIG.chromeProfileDir, {
         headless: true,
         ...(CONFIG.browserChannel === 'chrome' && { channel: 'chrome' as const }),
+        ...(proxyServer && { proxy: { server: proxyServer } }),
         viewport: CONFIG.viewport,
         locale: browserLocale,
         args: [
