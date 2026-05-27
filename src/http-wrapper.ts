@@ -16,6 +16,8 @@ import { ToolHandlers } from './tools/index.js';
 import { AutoDiscovery } from './auto-discovery/auto-discovery.js';
 import { StartupManager } from './startup/startup-manager.js';
 import { log } from './utils/logger.js';
+import { NotebookLMMCPServer } from './index.js';
+import { startHttpTransport, bindMcpServer } from './transport/http.js';
 
 // Extend Express Request to include requestId
 declare global {
@@ -1256,6 +1258,32 @@ async function startServer(port: number, host: string): Promise<void> {
 
   log.success(`🌐 NotebookLM MCP HTTP Server v${VERSION}`);
   log.success(`   Listening on ${HOST}:${PORT}`);
+
+  // Optionally start MCP streamable-HTTP transport in the same process so
+  // remote agents (Hermes, Claude Code, etc.) can speak the MCP protocol
+  // directly without spawning a stdio proxy locally. Shares the existing
+  // Chrome instance through the injected managers.
+  const mcpTransport = (process.env.NOTEBOOKLM_TRANSPORT || '').toLowerCase();
+  const mcpEnabled =
+    mcpTransport === 'http' || mcpTransport === 'streamable-http' || !!process.env.MCP_HTTP_PORT;
+  if (mcpEnabled) {
+    const mcpPort = Number(process.env.MCP_HTTP_PORT || process.env.NOTEBOOKLM_PORT || 8091);
+    const mcpHost = process.env.NOTEBOOKLM_HOST || process.env.MCP_HTTP_HOST || '0.0.0.0';
+    const mcp = new NotebookLMMCPServer({
+      authManager,
+      sessionManager,
+      library,
+      toolHandlers,
+    });
+    await startHttpTransport({
+      port: mcpPort,
+      host: mcpHost,
+      connect: async (transport) => {
+        await bindMcpServer(mcp.mcpServer, transport);
+      },
+    });
+    log.success(`🔌 MCP streamable-HTTP transport on http://${mcpHost}:${mcpPort}/mcp`);
+  }
 
   // Run startup sequence (account connection, auth verification)
   const startupResult = await startupManager.startup();

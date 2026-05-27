@@ -63,7 +63,14 @@ const SERVER_VERSION = packageJson.version;
 /**
  * Main MCP Server Class
  */
-class NotebookLMMCPServer {
+export interface NotebookLMMCPServerDeps {
+  authManager?: AuthManager;
+  sessionManager?: SessionManager;
+  library?: NotebookLibrary;
+  toolHandlers?: ToolHandlers;
+}
+
+export class NotebookLMMCPServer {
   private server: Server;
   private authManager: AuthManager;
   private sessionManager: SessionManager;
@@ -71,7 +78,12 @@ class NotebookLMMCPServer {
   private toolHandlers: ToolHandlers;
   private toolDefinitions: Tool[];
 
-  constructor() {
+  /** Expose the underlying MCP Server so external transports can connect to it. */
+  get mcpServer(): Server {
+    return this.server;
+  }
+
+  constructor(deps?: NotebookLMMCPServerDeps) {
     // Initialize MCP Server
     this.server = new Server(
       {
@@ -86,11 +98,14 @@ class NotebookLMMCPServer {
       }
     );
 
-    // Initialize managers
-    this.authManager = new AuthManager();
-    this.sessionManager = new SessionManager(this.authManager);
-    this.library = new NotebookLibrary();
-    this.toolHandlers = new ToolHandlers(this.sessionManager, this.authManager, this.library);
+    // Initialize managers — accept injected instances so we can share a single
+    // Chrome profile across the REST API and MCP streamable-HTTP transports
+    // running in the same process.
+    this.authManager = deps?.authManager ?? new AuthManager();
+    this.sessionManager = deps?.sessionManager ?? new SessionManager(this.authManager);
+    this.library = deps?.library ?? new NotebookLibrary();
+    this.toolHandlers =
+      deps?.toolHandlers ?? new ToolHandlers(this.sessionManager, this.authManager, this.library);
 
     // Build tool definitions with library context
     this.toolDefinitions = buildToolDefinitions(this.library) as Tool[];
