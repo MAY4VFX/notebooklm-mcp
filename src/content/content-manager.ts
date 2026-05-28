@@ -3160,7 +3160,7 @@ export class ContentManager {
 
     // Handle Google export types (presentation -> Google Slides, data_table -> Google Sheets)
     if (contentType === 'presentation') {
-      return await this.exportPresentationToGoogleSlides();
+      return await this.exportPresentationToGoogleSlides(outputPath);
     }
 
     if (contentType === 'data_table') {
@@ -3567,110 +3567,153 @@ export class ContentManager {
    * Export presentation to Google Slides
    * Finds and clicks the "Open in Slides" button to get the Google Slides URL
    */
-  private async exportPresentationToGoogleSlides(): Promise<ContentDownloadResult> {
-    log.info(`  📤 Exporting presentation to Google Slides...`);
+  private async exportPresentationToGoogleSlides(
+    outputPath?: string
+  ): Promise<ContentDownloadResult> {
+    log.info(`  📤 Downloading presentation as PDF (2026 NotebookLM UI)...`);
 
     try {
-      // Navigate to presentation panel
-      const panelConfig = this.getContentPanelConfig('presentation');
-      await this.navigateToContentPanel(panelConfig);
+      // 2026 NotebookLM Studio redesign: presentations live as artifact cards
+      // in the Studio sidebar (e.g. "AI-Native Studio Blueprint (5)"). The
+      // download flow is:
+      //   1. open the Studio tab
+      //   2. open one of those cards → an `.artifact-viewer-container` appears
+      //   3. inside the viewer, click the "more" (Ещё) kebab → mat-menu opens
+      //   4. click "Скачать в формате PDF" → browser fires a download event
+      //   5. saveAs() the PDF to outputPath (or /data/<suggested>)
+      await this.navigateToStudio();
+      await randomDelay(800, 1200);
 
-      // Look for export button — PDF download is the preferred path (returns
-      // a real file instead of a Google Slides URL we'd have to re-fetch).
-      const exportSelectors = [
-        // Russian — PDF first (this account's UI is ru and PDF is what we want)
-        'button:has-text("Скачать PDF")',
-        'button:has-text("Загрузить PDF")',
-        'button[aria-label*="Скачать PDF"]',
-        'button[aria-label*="PDF"]',
-        '[role="menuitem"]:has-text("Скачать PDF")',
-        '[role="menuitem"]:has-text("PDF")',
-        // English / French PDF
-        'button:has-text("Download PDF")',
-        'button:has-text("Télécharger PDF")',
-        '[role="menuitem"]:has-text("Download PDF")',
-        // PPTX fallback if Google rolls it out
-        'button:has-text("Скачать PPTX")',
-        'button:has-text("Download PPTX")',
-        'button[aria-label*="PPTX"]',
-        // Russian Slides export fallback
-        'button:has-text("Открыть в Slides")',
-        'button:has-text("Экспорт в Slides")',
-        // English / French Slides export
-        'button:has-text("Open in Slides")',
-        'button:has-text("Ouvrir dans Slides")',
-        'button:has-text("Export to Slides")',
-        'button:has-text("Google Slides")',
-        'a[href*="docs.google.com/presentation"]',
-        'button[aria-label*="Slides"]',
-        'button[aria-label*="slides"]',
-        'button:has(mat-icon:has-text("slideshow"))',
-      ];
+      // Step 1: ensure an artifact viewer is open. If not, click the most
+      // recent presentation-style artifact card.
+      const viewerSelector = '.artifact-viewer-container, [class*="artifact-viewer"]';
+      let viewerOpen = await this.page
+        .locator(viewerSelector)
+        .first()
+        .isVisible({ timeout: 1500 })
+        .catch(() => false);
 
-      for (const selector of exportSelectors) {
-        try {
-          const btn = this.page.locator(selector).first();
-          if (await btn.isVisible({ timeout: 1000 })) {
-            log.info(`  ✅ Found export button: ${selector}`);
-
-            // Check if it's a direct link
-            const href = await btn.getAttribute('href');
-            if (href && href.includes('docs.google.com/presentation')) {
-              log.success(`  ✅ Google Slides URL found: ${href}`);
-              return {
-                success: true,
-                googleSlidesUrl: href,
-                mimeType: 'application/vnd.google-apps.presentation',
-              };
-            }
-
-            // Click the button and wait for navigation or new tab
-            const [newPage] = await Promise.all([
-              this.page
-                .context()
-                .waitForEvent('page', { timeout: 10000 })
-                .catch(() => null),
-              btn.click(),
-            ]);
-
-            if (newPage) {
-              const newUrl = newPage.url();
-              await newPage.close();
-              if (newUrl.includes('docs.google.com/presentation')) {
-                log.success(`  ✅ Google Slides URL: ${newUrl}`);
-                return {
-                  success: true,
-                  googleSlidesUrl: newUrl,
-                  mimeType: 'application/vnd.google-apps.presentation',
-                };
-              }
-            }
-
-            // Check current page URL
-            await randomDelay(2000, 3000);
-            const currentUrl = this.page.url();
-            if (currentUrl.includes('docs.google.com/presentation')) {
-              log.success(`  ✅ Navigated to Google Slides: ${currentUrl}`);
-              return {
-                success: true,
-                googleSlidesUrl: currentUrl,
-                mimeType: 'application/vnd.google-apps.presentation',
-              };
-            }
+      if (!viewerOpen) {
+        log.info(`  🔎 No artifact open — clicking the first Studio card...`);
+        const cardSelectors = [
+          'labs-tailwind-artifact-card',
+          '[class*="artifact-card"]',
+          'mat-card[class*="studio"]',
+          // last-resort: any tile that mentions "Blueprint" / "Презентация"
+          '[role="listitem"]:has-text("Blueprint")',
+          '[role="listitem"]:has-text("Презентация")',
+        ];
+        let opened = false;
+        for (const sel of cardSelectors) {
+          const card = this.page.locator(sel).first();
+          if (await card.isVisible({ timeout: 1000 }).catch(() => false)) {
+            await card.click();
+            opened = true;
+            log.info(`  ✅ Opened artifact via selector: ${sel}`);
+            break;
           }
-        } catch {
-          continue;
+        }
+        if (!opened) {
+          return {
+            success: false,
+            error:
+              'No presentation artifact found in the Studio sidebar. Generate one first via content.generate.',
+          };
+        }
+        await randomDelay(1500, 2500);
+        viewerOpen = await this.page
+          .locator(viewerSelector)
+          .first()
+          .isVisible({ timeout: 3000 })
+          .catch(() => false);
+        if (!viewerOpen) {
+          return {
+            success: false,
+            error: 'Clicked an artifact card but the viewer panel never appeared',
+          };
         }
       }
 
+      // Step 2: open the "more" menu (kebab/three-dots) inside the viewer.
+      // The accessible label is "Ещё" in Russian UI and "More" elsewhere.
+      const moreMenuSelectors = [
+        '.artifact-viewer-container button[aria-haspopup="menu"][aria-label="Ещё"]',
+        '.artifact-viewer-container button[aria-haspopup="menu"][aria-label="More"]',
+        '.artifact-viewer-container button[aria-haspopup="menu"]',
+        '[class*="artifact-viewer"] button[aria-haspopup="menu"][aria-label="Ещё"]',
+        '[class*="artifact-viewer"] button[aria-haspopup="menu"][aria-label="More"]',
+        '[class*="artifact-viewer"] button[aria-haspopup="menu"]',
+      ];
+      let menuOpened = false;
+      for (const sel of moreMenuSelectors) {
+        const btn = this.page.locator(sel).first();
+        if (await btn.isVisible({ timeout: 800 }).catch(() => false)) {
+          await btn.click();
+          menuOpened = true;
+          log.info(`  ✅ Opened more-menu: ${sel}`);
+          break;
+        }
+      }
+      if (!menuOpened) {
+        return {
+          success: false,
+          error: 'Could not open the artifact more-menu (kebab "Ещё"/"More" button not found)',
+        };
+      }
+      await randomDelay(400, 700);
+
+      // Step 3: click the "Download PDF" menu item.
+      const exportSelectors = [
+        // Russian — primary path for this deployment
+        'button[role="menuitem"]:has-text("Скачать в формате PDF")',
+        '[role="menuitem"]:has-text("Скачать в формате PDF")',
+        'button.mat-mdc-menu-item:has-text("Скачать в формате PDF")',
+        // English / French fallback
+        'button[role="menuitem"]:has-text("Download as PDF")',
+        '[role="menuitem"]:has-text("Download as PDF")',
+        'button[role="menuitem"]:has-text("Download PDF")',
+        '[role="menuitem"]:has-text("Download PDF")',
+        'button[role="menuitem"]:has-text("Télécharger en PDF")',
+        // PPTX fallback if PDF disappears in the menu for some reason
+        'button[role="menuitem"]:has-text("Скачать в формате PowerPoint")',
+        'button[role="menuitem"]:has-text("Download as PowerPoint")',
+      ];
+
+      let pdfItem: ReturnType<typeof this.page.locator> | null = null;
+      for (const selector of exportSelectors) {
+        const el = this.page.locator(selector).first();
+        if (await el.isVisible({ timeout: 700 }).catch(() => false)) {
+          pdfItem = el;
+          log.info(`  ✅ Found PDF menu item: ${selector}`);
+          break;
+        }
+      }
+      if (!pdfItem) {
+        return {
+          success: false,
+          error:
+            'PDF download menu item not found inside the more-menu (UI text/role may have changed)',
+        };
+      }
+
+      // Step 4: arm the download listener BEFORE clicking, then click.
+      const downloadPromise = this.page.waitForEvent('download', { timeout: 120000 });
+      await pdfItem.click();
+      const download = await downloadPromise;
+
+      const suggestedName = download.suggestedFilename() || 'presentation.pdf';
+      const savePath = outputPath || path.join(CONFIG.dataDir, suggestedName);
+      await download.saveAs(savePath);
+
+      log.success(`  ✅ Presentation PDF saved: ${savePath}`);
       return {
-        success: false,
-        error:
-          'Could not find Google Slides export button. The presentation may not be ready or the export feature is not available.',
+        success: true,
+        filePath: savePath,
+        mimeType: 'application/pdf',
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      return { success: false, error: `Export to Google Slides failed: ${errorMsg}` };
+      return { success: false, error: `Presentation PDF download failed: ${errorMsg}` };
     }
   }
 
