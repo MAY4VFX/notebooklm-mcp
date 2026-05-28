@@ -78,7 +78,7 @@ export interface Config {
   instanceProfileMaxCount: number;
 
   // UI Locale (NotebookLM follows Google Account language)
-  uiLocale: 'fr' | 'en';
+  uiLocale: 'fr' | 'en' | 'ru';
 
   // Browser channel: 'chromium' (default, Docker compatible) or 'chrome' (local install)
   browserChannel: 'chromium' | 'chrome';
@@ -199,7 +199,7 @@ function parseLocale(
 ): Config['uiLocale'] {
   if (!value) return defaultValue;
   const lower = value.toLowerCase();
-  if (lower === 'fr' || lower === 'en') {
+  if (lower === 'fr' || lower === 'en' || lower === 'ru') {
     return lower;
   }
   return defaultValue;
