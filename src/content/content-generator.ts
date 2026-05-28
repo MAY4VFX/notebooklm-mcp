@@ -179,11 +179,18 @@ export class ContentGenerator {
     // Updated selectors based on current NotebookLM UI (Dec 2024)
     // The tabs are: Sources | Discussion | Studio
     const studioSelectors = [
+      // English UI
       'div.mdc-tab:has-text("Studio")', // Material Design tab with text
       '.mat-mdc-tab:has-text("Studio")', // Angular Material tab
       '[role="tab"]:has-text("Studio")', // Tab role with Studio text
       'div.mdc-tab >> text=Studio', // Playwright text selector
-      '.notebook-guide', // Legacy fallback
+      // Russian UI (2026 redesign — account language ru)
+      'div.mdc-tab:has-text("Студия")',
+      '.mat-mdc-tab:has-text("Студия")',
+      '[role="tab"]:has-text("Студия")',
+      'div.mdc-tab >> text=Студия',
+      // Legacy fallback
+      '.notebook-guide',
     ];
 
     for (const selector of studioSelectors) {

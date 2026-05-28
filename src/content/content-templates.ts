@@ -533,12 +533,24 @@ export const CONTENT_CONFIGS: Record<ContentType, ContentTypeConfig> = {
     type: 'presentation',
     displayName: 'Presentation',
     buttonSelectors: [
-      // Primary patterns
+      // Russian UI (2026 redesign — tiles, not text buttons)
+      'mat-card:has-text("Презентация")',
+      '[role="button"]:has-text("Презентация")',
+      'button:has-text("Презентация")',
+      'button[aria-label*="Презентация"]',
+      'a[aria-label*="Презентация"]',
+      '[aria-label*="Презентация"][role="button"]',
+      // Primary patterns (English)
       'button:has-text("Slides")',
       'button:has-text("Presentation")',
       'button:has-text("Generate slides")',
       'button:has-text("Create presentation")',
       'button:has-text("Diaporama")',
+      // 2026 redesign — tile blocks (mat-card / role=button divs)
+      'mat-card:has-text("Slides")',
+      'mat-card:has-text("Presentation")',
+      '[role="button"]:has-text("Slides")',
+      '[role="button"]:has-text("Presentation")',
       // Aria patterns
       'button[aria-label*="slides" i]',
       'button[aria-label*="presentation" i]',
@@ -557,6 +569,13 @@ export const CONTENT_CONFIGS: Record<ContentType, ContentTypeConfig> = {
     formatSelectors: {
       detailed_slideshow: {
         selectors: [
+          // Russian
+          'button:has-text("Подробная презентация")',
+          'button:has-text("Подробный слайдшоу")',
+          '[role="option"]:has-text("Подробная презентация")',
+          '[role="menuitem"]:has-text("Подробная презентация")',
+          'mat-option:has-text("Подробная презентация")',
+          // English / French
           'button:has-text("Detailed slideshow")',
           'button:has-text("Diaporama détaillé")',
           'button:has-text("detailed slideshow")',

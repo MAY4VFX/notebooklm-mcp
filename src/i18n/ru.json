@@ -1,0 +1,120 @@
+{
+  "$schema": "./locale-schema.json",
+  "locale": "ru",
+  "name": "Русский",
+  "description": "Russian UI selectors for NotebookLM (2026 redesign)",
+
+  "tabs": {
+    "sources": "Источники",
+    "discussion": "Чат",
+    "studio": "Студия"
+  },
+
+  "buttons": {
+    "addSource": "Добавить источник",
+    "addNote": "Добавить заметку",
+    "newNote": "Новая заметка",
+    "insert": "Вставить",
+    "add": "Добавить",
+    "upload": "Загрузить",
+    "delete": "Удалить",
+    "remove": "Убрать",
+    "confirm": "Подтвердить",
+    "yes": "Да",
+    "cancel": "Отмена",
+    "close": "Закрыть",
+    "save": "Сохранить",
+    "done": "Готово",
+    "create": "Создать",
+    "download": "Скачать",
+    "generate": "Создать"
+  },
+
+  "sourceTypes": {
+    "uploadFiles": "Загрузить файлы",
+    "website": "Веб-сайт",
+    "link": "Ссылка",
+    "url": "URL",
+    "pastedText": "Скопированный текст",
+    "drive": "Диск",
+    "youtube": "YouTube"
+  },
+
+  "placeholders": {
+    "pasteUrl": "Вставить",
+    "enterUrl": "Введите",
+    "pasteLinks": "ссылк"
+  },
+
+  "sourceNames": {
+    "pastedText": "Вставленный текст"
+  },
+
+  "contentTypes": {
+    "audio": "Аудиопересказ",
+    "video": "Видеопересказ",
+    "presentation": "Презентация",
+    "slides": "Слайды",
+    "infographic": "Инфографика",
+    "report": "Отчёт",
+    "briefing": "Брифинг",
+    "dataTable": "Таблица данных",
+    "table": "Таблица"
+  },
+
+  "contentOptions": {
+    "videoStyles": {
+      "classroom": "Учебный",
+      "documentary": "Документальный",
+      "animated": "Анимированный",
+      "corporate": "Корпоративный",
+      "cinematic": "Кинематографический",
+      "minimalist": "Минималистичный"
+    },
+    "videoFormats": {
+      "brief": "Краткий",
+      "explainer": "Объяснение"
+    },
+    "presentationStyles": {
+      "detailedSlideshow": "Подробная презентация",
+      "presenterNotes": "Заметки докладчика"
+    },
+    "presentationLengths": {
+      "short": "Короткая",
+      "default": "Стандартная"
+    },
+    "infographicFormats": {
+      "horizontal": "Горизонтальная",
+      "vertical": "Вертикальная"
+    },
+    "reportFormats": {
+      "summary": "Резюме",
+      "detailed": "Подробный"
+    }
+  },
+
+  "dialogs": {
+    "selectLanguage": "Выберите язык",
+    "language": "Язык"
+  },
+
+  "actions": {
+    "openInSheets": "Открыть в Sheets",
+    "openInSlides": "Открыть в Slides",
+    "deepDive": "Глубокое погружение",
+    "audioOverview": "Аудиопересказ",
+    "addToSources": "Добавить в источники",
+    "convertToSource": "Преобразовать в источник"
+  },
+
+  "status": {
+    "generating": "Создаётся",
+    "processing": "Обработка",
+    "ready": "Готово"
+  },
+
+  "errors": {
+    "error": "Ошибка",
+    "rateLimitReached": "Достигнут дневной лимит"
+  }
+}

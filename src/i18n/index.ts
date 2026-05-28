@@ -103,7 +103,7 @@ export interface LocaleData {
 }
 
 // Supported locales
-export type SupportedLocale = 'fr' | 'en';
+export type SupportedLocale = 'fr' | 'en' | 'ru';
 
 // Default locale
 const DEFAULT_LOCALE: SupportedLocale = 'fr';

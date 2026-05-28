@@ -3575,8 +3575,28 @@ export class ContentManager {
       const panelConfig = this.getContentPanelConfig('presentation');
       await this.navigateToContentPanel(panelConfig);
 
-      // Look for "Open in Slides" or similar export button
+      // Look for export button — PDF download is the preferred path (returns
+      // a real file instead of a Google Slides URL we'd have to re-fetch).
       const exportSelectors = [
+        // Russian — PDF first (this account's UI is ru and PDF is what we want)
+        'button:has-text("Скачать PDF")',
+        'button:has-text("Загрузить PDF")',
+        'button[aria-label*="Скачать PDF"]',
+        'button[aria-label*="PDF"]',
+        '[role="menuitem"]:has-text("Скачать PDF")',
+        '[role="menuitem"]:has-text("PDF")',
+        // English / French PDF
+        'button:has-text("Download PDF")',
+        'button:has-text("Télécharger PDF")',
+        '[role="menuitem"]:has-text("Download PDF")',
+        // PPTX fallback if Google rolls it out
+        'button:has-text("Скачать PPTX")',
+        'button:has-text("Download PPTX")',
+        'button[aria-label*="PPTX"]',
+        // Russian Slides export fallback
+        'button:has-text("Открыть в Slides")',
+        'button:has-text("Экспорт в Slides")',
+        // English / French Slides export
         'button:has-text("Open in Slides")',
         'button:has-text("Ouvrir dans Slides")',
         'button:has-text("Export to Slides")',
@@ -3585,9 +3605,6 @@ export class ContentManager {
         'button[aria-label*="Slides"]',
         'button[aria-label*="slides"]',
         'button:has(mat-icon:has-text("slideshow"))',
-        // Also look for download as PDF option
-        'button:has-text("Download PDF")',
-        'button:has-text("Télécharger PDF")',
       ];
 
       for (const selector of exportSelectors) {
