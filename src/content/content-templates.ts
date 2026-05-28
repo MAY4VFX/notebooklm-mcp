@@ -651,7 +651,7 @@ export const CONTENT_CONFIGS: Record<ContentType, ContentTypeConfig> = {
       detailed_slideshow: 'DETAILED SLIDESHOW with full visual slides',
       presenter_notes: 'PRESENTER NOTES style slides with speaker notes',
     },
-    waitTimeout: 300000, // 5 minutes
+    waitTimeout: 900000, // 15 minutes — Презентация is BETA in NotebookLM and routinely runs 7-10 min
     isMedia: true, // Can be exported to Google Slides/PDF
     mimeType: 'application/pdf', // Primary download format
     supportsCustomInstructions: true,
