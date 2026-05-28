@@ -3573,97 +3573,42 @@ export class ContentManager {
     log.info(`  📤 Downloading presentation as PDF (2026 NotebookLM UI)...`);
 
     try {
-      // 2026 NotebookLM Studio redesign: presentations live as artifact cards
-      // in the Studio sidebar (e.g. "AI-Native Studio Blueprint (5)"). The
-      // download flow is:
+      // 2026 NotebookLM Studio redesign:
+      //   * Presentations live as <artifact-library-item> cards in the
+      //     Studio sidebar (e.g. "AI-Native Studio Blueprint (5)").
+      //   * Each card has its own kebab — a button[aria-haspopup="menu"]
+      //     with aria-label "Ещё" (RU) / "More" (EN) — and clicking it
+      //     opens a mat-menu whose contents depend on the artifact type.
+      //     For presentations the menu contains
+      //       "Скачать в формате PDF" / "Download as PDF"
+      //       "Скачать в формате PowerPoint (PPTX)"
+      //       "Удалить" / "Delete"
+      //     so the PDF item is the *marker* that distinguishes a
+      //     presentation card from an audio / video / report card —
+      //     much more reliable than guessing by mat-icon or title.
+      //
+      // Flow:
       //   1. open the Studio tab
-      //   2. open one of those cards → an `.artifact-viewer-container` appears
-      //   3. inside the viewer, click the "more" (Ещё) kebab → mat-menu opens
-      //   4. click "Скачать в формате PDF" → browser fires a download event
-      //   5. saveAs() the PDF to outputPath (or /data/<suggested>)
+      //   2. enumerate <artifact-library-item> cards in order (newest first)
+      //   3. open each one's kebab, check whether the menu offers
+      //      "Скачать в формате PDF" — if yes, click it; if no, close and
+      //      move on to the next card
+      //   4. catch page.waitForEvent('download') and saveAs() to outputPath
       await this.navigateToStudio();
       await randomDelay(800, 1200);
 
-      // Step 1: ensure an artifact viewer is open. If not, click the most
-      // recent presentation-style artifact card.
-      const viewerSelector = '.artifact-viewer-container, [class*="artifact-viewer"]';
-      let viewerOpen = await this.page
-        .locator(viewerSelector)
-        .first()
-        .isVisible({ timeout: 1500 })
-        .catch(() => false);
-
-      if (!viewerOpen) {
-        log.info(`  🔎 No artifact open — clicking the first Studio card...`);
-        const cardSelectors = [
-          'labs-tailwind-artifact-card',
-          '[class*="artifact-card"]',
-          'mat-card[class*="studio"]',
-          // last-resort: any tile that mentions "Blueprint" / "Презентация"
-          '[role="listitem"]:has-text("Blueprint")',
-          '[role="listitem"]:has-text("Презентация")',
-        ];
-        let opened = false;
-        for (const sel of cardSelectors) {
-          const card = this.page.locator(sel).first();
-          if (await card.isVisible({ timeout: 1000 }).catch(() => false)) {
-            await card.click();
-            opened = true;
-            log.info(`  ✅ Opened artifact via selector: ${sel}`);
-            break;
-          }
-        }
-        if (!opened) {
-          return {
-            success: false,
-            error:
-              'No presentation artifact found in the Studio sidebar. Generate one first via content.generate.',
-          };
-        }
-        await randomDelay(1500, 2500);
-        viewerOpen = await this.page
-          .locator(viewerSelector)
-          .first()
-          .isVisible({ timeout: 3000 })
-          .catch(() => false);
-        if (!viewerOpen) {
-          return {
-            success: false,
-            error: 'Clicked an artifact card but the viewer panel never appeared',
-          };
-        }
-      }
-
-      // Step 2: open the "more" menu (kebab/three-dots) inside the viewer.
-      // The accessible label is "Ещё" in Russian UI and "More" elsewhere.
-      const moreMenuSelectors = [
-        '.artifact-viewer-container button[aria-haspopup="menu"][aria-label="Ещё"]',
-        '.artifact-viewer-container button[aria-haspopup="menu"][aria-label="More"]',
-        '.artifact-viewer-container button[aria-haspopup="menu"]',
-        '[class*="artifact-viewer"] button[aria-haspopup="menu"][aria-label="Ещё"]',
-        '[class*="artifact-viewer"] button[aria-haspopup="menu"][aria-label="More"]',
-        '[class*="artifact-viewer"] button[aria-haspopup="menu"]',
-      ];
-      let menuOpened = false;
-      for (const sel of moreMenuSelectors) {
-        const btn = this.page.locator(sel).first();
-        if (await btn.isVisible({ timeout: 800 }).catch(() => false)) {
-          await btn.click();
-          menuOpened = true;
-          log.info(`  ✅ Opened more-menu: ${sel}`);
-          break;
-        }
-      }
-      if (!menuOpened) {
+      const cards = this.page.locator('artifact-library-item');
+      const cardCount = await cards.count();
+      log.info(`  🔎 Studio sidebar has ${cardCount} artifact card(s)`);
+      if (cardCount === 0) {
         return {
           success: false,
-          error: 'Could not open the artifact more-menu (kebab "Ещё"/"More" button not found)',
+          error:
+            'No artifact cards found in the Studio sidebar. Generate a presentation first via content.generate.',
         };
       }
-      await randomDelay(400, 700);
 
-      // Step 3: click the "Download PDF" menu item.
-      const exportSelectors = [
+      const pdfSelectors = [
         // Russian — primary path for this deployment
         'button[role="menuitem"]:has-text("Скачать в формате PDF")',
         '[role="menuitem"]:has-text("Скачать в формате PDF")',
@@ -3674,42 +3619,68 @@ export class ContentManager {
         'button[role="menuitem"]:has-text("Download PDF")',
         '[role="menuitem"]:has-text("Download PDF")',
         'button[role="menuitem"]:has-text("Télécharger en PDF")',
-        // PPTX fallback if PDF disappears in the menu for some reason
-        'button[role="menuitem"]:has-text("Скачать в формате PowerPoint")',
-        'button[role="menuitem"]:has-text("Download as PowerPoint")',
       ];
 
-      let pdfItem: ReturnType<typeof this.page.locator> | null = null;
-      for (const selector of exportSelectors) {
-        const el = this.page.locator(selector).first();
-        if (await el.isVisible({ timeout: 700 }).catch(() => false)) {
-          pdfItem = el;
-          log.info(`  ✅ Found PDF menu item: ${selector}`);
-          break;
+      const maxCardsToTry = Math.min(cardCount, 10);
+      for (let i = 0; i < maxCardsToTry; i++) {
+        const card = cards.nth(i);
+        const cardText = (await card.textContent().catch(() => ''))
+          ?.replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 80);
+        const kebab = card
+          .locator(
+            'button[aria-haspopup="menu"][aria-label="Ещё"], button[aria-haspopup="menu"][aria-label="More"], button[aria-haspopup="menu"]'
+          )
+          .first();
+        if (!(await kebab.isVisible({ timeout: 600 }).catch(() => false))) {
+          log.dim(`    card ${i + 1}/${maxCardsToTry}: no kebab — skip — "${cardText}"`);
+          continue;
         }
-      }
-      if (!pdfItem) {
+        await kebab.click();
+        await randomDelay(300, 500);
+
+        let pdfItem: ReturnType<typeof this.page.locator> | null = null;
+        for (const sel of pdfSelectors) {
+          const el = this.page.locator(sel).first();
+          if (await el.isVisible({ timeout: 400 }).catch(() => false)) {
+            pdfItem = el;
+            break;
+          }
+        }
+
+        if (!pdfItem) {
+          log.dim(
+            `    card ${i + 1}/${maxCardsToTry}: not a presentation (no PDF item) — "${cardText}"`
+          );
+          await this.page.keyboard.press('Escape').catch(() => undefined);
+          await randomDelay(200, 350);
+          continue;
+        }
+
+        log.info(`  ✅ Card ${i + 1} is a presentation: "${cardText}"`);
+
+        // Arm the download listener BEFORE clicking — Chromium fires the
+        // 'download' event before the click() promise resolves.
+        const downloadPromise = this.page.waitForEvent('download', { timeout: 120000 });
+        await pdfItem.click();
+        const download = await downloadPromise;
+
+        const suggestedName = download.suggestedFilename() || 'presentation.pdf';
+        const savePath = outputPath || path.join(CONFIG.dataDir, suggestedName);
+        await download.saveAs(savePath);
+
+        log.success(`  ✅ Presentation PDF saved: ${savePath}`);
         return {
-          success: false,
-          error:
-            'PDF download menu item not found inside the more-menu (UI text/role may have changed)',
+          success: true,
+          filePath: savePath,
+          mimeType: 'application/pdf',
         };
       }
 
-      // Step 4: arm the download listener BEFORE clicking, then click.
-      const downloadPromise = this.page.waitForEvent('download', { timeout: 120000 });
-      await pdfItem.click();
-      const download = await downloadPromise;
-
-      const suggestedName = download.suggestedFilename() || 'presentation.pdf';
-      const savePath = outputPath || path.join(CONFIG.dataDir, suggestedName);
-      await download.saveAs(savePath);
-
-      log.success(`  ✅ Presentation PDF saved: ${savePath}`);
       return {
-        success: true,
-        filePath: savePath,
-        mimeType: 'application/pdf',
+        success: false,
+        error: `Checked ${maxCardsToTry} artifact cards; none offered a "Скачать в формате PDF" / "Download as PDF" menu item. No presentation is available to download.`,
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
