@@ -1269,16 +1269,24 @@ async function startServer(port: number, host: string): Promise<void> {
   if (mcpEnabled) {
     const mcpPort = Number(process.env.MCP_HTTP_PORT || process.env.NOTEBOOKLM_PORT || 8091);
     const mcpHost = process.env.NOTEBOOKLM_HOST || process.env.MCP_HTTP_HOST || '0.0.0.0';
-    const mcp = new NotebookLMMCPServer({
-      authManager,
-      sessionManager,
-      library,
-      toolHandlers,
-    });
+    // Streamable-HTTP MCP spec requires a fresh Server<->Transport pair per
+    // session — the SDK Server can only `.connect()` to one transport in its
+    // lifetime ("Already connected to a transport" otherwise). We share the
+    // expensive singletons (Chrome via authManager / sessionManager, the
+    // notebook library cache, the tool handlers) through DI, and spin up a
+    // cheap per-session McpServer instance inside the connect callback.
     await startHttpTransport({
       port: mcpPort,
       host: mcpHost,
       connect: async (transport) => {
+        const mcp = new NotebookLMMCPServer({
+          authManager,
+          sessionManager,
+          library,
+          toolHandlers,
+          skipShutdownHandlers: true,
+          quiet: true,
+        });
         await bindMcpServer(mcp.mcpServer, transport);
       },
     });

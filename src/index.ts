@@ -68,6 +68,14 @@ export interface NotebookLMMCPServerDeps {
   sessionManager?: SessionManager;
   library?: NotebookLibrary;
   toolHandlers?: ToolHandlers;
+  /**
+   * Skip registering process.on('SIGINT'|'SIGTERM'|'uncaughtException'|'unhandledRejection').
+   * Set to true when creating short-lived per-HTTP-session instances so the parent process
+   * owns shutdown and we don't pile up listeners (Node warns at 10).
+   */
+  skipShutdownHandlers?: boolean;
+  /** Suppress the noisy startup banner log when spawning per-session instances. */
+  quiet?: boolean;
 }
 
 export class NotebookLMMCPServer {
@@ -112,12 +120,16 @@ export class NotebookLMMCPServer {
 
     // Setup handlers
     this.setupHandlers();
-    this.setupShutdownHandlers();
+    if (!deps?.skipShutdownHandlers) {
+      this.setupShutdownHandlers();
+    }
 
-    log.info('🚀 NotebookLM MCP Server initialized');
-    log.info(`  Version: ${SERVER_VERSION}`);
-    log.info(`  Node: ${process.version}`);
-    log.info(`  Platform: ${process.platform}`);
+    if (!deps?.quiet) {
+      log.info('🚀 NotebookLM MCP Server initialized');
+      log.info(`  Version: ${SERVER_VERSION}`);
+      log.info(`  Node: ${process.version}`);
+      log.info(`  Platform: ${process.platform}`);
+    }
   }
 
   /**
