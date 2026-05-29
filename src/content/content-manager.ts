@@ -901,8 +901,30 @@ export class ContentManager {
         throw new Error('Text input not found in dialog');
       }
 
+      // Set the textarea value via the NATIVE setter + a bubbling 'input'
+      // event rather than Playwright's fill(). On this Angular-Material paste
+      // textarea, fill() leaves the value visible and even enables the
+      // confirm button, but the reactive form doesn't treat it as a committed
+      // value — clicking "Добавить" then closes the dialog WITHOUT creating a
+      // source (verified: identical native-setter+dispatch path DOES create
+      // the source, fill() does not). React/Angular only react to the value
+      // setter's side-effect when the 'input' event is dispatched this way.
+      const setTextareaValue = async (value: string): Promise<void> => {
+        await textInput!.evaluate((el, val) => {
+          /* eslint-disable @typescript-eslint/no-explicit-any */
+          const ta = el as any;
+          const proto = (globalThis as any).HTMLTextAreaElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+          setter?.call(ta, val);
+          ta.dispatchEvent(new (globalThis as any).Event('input', { bubbles: true }));
+          ta.dispatchEvent(new (globalThis as any).Event('change', { bubbles: true }));
+          /* eslint-enable @typescript-eslint/no-explicit-any */
+        }, value);
+      };
+
       let textToInsert = input.text;
-      await textInput.fill(textToInsert);
+      await textInput.focus().catch(() => undefined);
+      await setTextareaValue(textToInsert);
       log.info(`  ✅ Text entered (${textToInsert.length} chars)`);
 
       // Set title if provided
@@ -935,7 +957,7 @@ export class ContentManager {
         if (!titleSet) {
           log.warning(`  ⚠️ Title input NOT found - source will have default name`);
           textToInsert = `${input.title}\n\n${input.text}`;
-          await textInput.fill(textToInsert);
+          await setTextareaValue(textToInsert);
           log.info(`  ✅ Fallback title injected into pasted text: ${input.title}`);
           // Debug: list all inputs in dialog
           try {
