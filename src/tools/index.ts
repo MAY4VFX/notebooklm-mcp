@@ -4046,34 +4046,46 @@ export class ToolHandlers {
           // uses the actual 2026 RU selector instead of guessing. Logged as
           // RENAME-PROBE; removed once the selector is confirmed.
           try {
+            // Note: tsconfig has no DOM lib, so we avoid document/Element types
+            // and reach DOM globals through a typed cast (same style as the
+            // existing el.evaluate((node: unknown) => …) below).
             const probe = await page.evaluate(() => {
+              type Elish = {
+                tagName: string;
+                getAttribute(n: string): string | null;
+                innerText?: string;
+                textContent: string | null;
+              };
+              const d = (
+                globalThis as unknown as {
+                  document?: { querySelectorAll(s: string): ArrayLike<Elish> };
+                }
+              ).document;
               const defaults = ['Untitled notebook', 'Новый блокнот', 'Без названия'];
               const seen: Array<Record<string, string | null>> = [];
-              const describe = (el: Element, why: string) => {
-                const h = el as HTMLElement;
+              if (!d) return seen;
+              const describe = (el: Elish, why: string) => {
                 seen.push({
                   why,
-                  tag: el.tagName.toLowerCase(),
+                  tag: (el.tagName || '').toLowerCase(),
                   role: el.getAttribute('role'),
                   ariaLabel: el.getAttribute('aria-label'),
                   placeholder: el.getAttribute('placeholder'),
                   contenteditable: el.getAttribute('contenteditable'),
                   cls: (el.getAttribute('class') || '').slice(0, 100),
-                  text: (h.innerText || el.textContent || '')
+                  text: (el.innerText || el.textContent || '')
                     .replace(/\s+/g, ' ')
                     .trim()
                     .slice(0, 50),
                 });
               };
-              document
-                .querySelectorAll(
+              Array.from(
+                d.querySelectorAll(
                   'h1,h2,[role="heading"],[contenteditable],input,textarea,[role="textbox"]'
                 )
-                .forEach((el) => describe(el, 'editable-or-heading'));
-              document.querySelectorAll('span,div').forEach((el) => {
-                const t = ((el as HTMLElement).innerText || el.textContent || '')
-                  .replace(/\s+/g, ' ')
-                  .trim();
+              ).forEach((el) => describe(el, 'editable-or-heading'));
+              Array.from(d.querySelectorAll('span,div')).forEach((el) => {
+                const t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
                 if (defaults.includes(t)) describe(el, 'default-title-text');
               });
               return seen.slice(0, 30);
