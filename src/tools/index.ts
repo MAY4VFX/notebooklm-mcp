@@ -4041,6 +4041,48 @@ export class ToolHandlers {
         let observedName = '';
         if (name) {
           log.info(`  📝 Attempting rename to: ${name}`);
+
+          // DIAGNOSTIC (temporary): capture the real title-bar DOM so the rename
+          // uses the actual 2026 RU selector instead of guessing. Logged as
+          // RENAME-PROBE; removed once the selector is confirmed.
+          try {
+            const probe = await page.evaluate(() => {
+              const defaults = ['Untitled notebook', 'Новый блокнот', 'Без названия'];
+              const seen: Array<Record<string, string | null>> = [];
+              const describe = (el: Element, why: string) => {
+                const h = el as HTMLElement;
+                seen.push({
+                  why,
+                  tag: el.tagName.toLowerCase(),
+                  role: el.getAttribute('role'),
+                  ariaLabel: el.getAttribute('aria-label'),
+                  placeholder: el.getAttribute('placeholder'),
+                  contenteditable: el.getAttribute('contenteditable'),
+                  cls: (el.getAttribute('class') || '').slice(0, 100),
+                  text: (h.innerText || el.textContent || '')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .slice(0, 50),
+                });
+              };
+              document
+                .querySelectorAll(
+                  'h1,h2,[role="heading"],[contenteditable],input,textarea,[role="textbox"]'
+                )
+                .forEach((el) => describe(el, 'editable-or-heading'));
+              document.querySelectorAll('span,div').forEach((el) => {
+                const t = ((el as HTMLElement).innerText || el.textContent || '')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+                if (defaults.includes(t)) describe(el, 'default-title-text');
+              });
+              return seen.slice(0, 30);
+            });
+            log.info(`  🔎 RENAME-PROBE (${probe.length}): ${JSON.stringify(probe)}`);
+          } catch (probeErr) {
+            log.warning(`  🔎 RENAME-PROBE failed: ${probeErr}`);
+          }
+
           // Most-specific selectors first: aria-label or placeholder that
           // explicitly indicate "title" / "Untitled". Generic contenteditable
           // is the last resort.
