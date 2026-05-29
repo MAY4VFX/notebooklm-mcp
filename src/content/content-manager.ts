@@ -1174,58 +1174,69 @@ export class ContentManager {
       '[role="dialog"]',
       '.cdk-overlay-pane',
     ];
+    // CRITICAL: the confirm button starts DISABLED (Angular adds
+    // .mat-mdc-button-disabled / [disabled] until the reactive form sees the
+    // pasted text). A disabled button is still "visible", so an unguarded
+    // .click() waits for actionability, times out, and the loop falls through
+    // to a generic fallback that clicks the WRONG button (source-type chooser
+    // → "source not visible" / "timeout waiting for processing"). So every
+    // confirm selector is guarded with :not([disabled]):not(.mat-mdc-button-disabled),
+    // and we POLL for the enabled button for a few seconds before giving up.
+    const ENABLED = ':not([disabled]):not(.mat-mdc-button-disabled)';
     const dialogConfirm: string[] = [];
     for (const scope of dialogScope) {
-      // 1) Structural: the Material primary/unelevated confirm button. This
-      //    is locale-independent and the most reliable.
-      dialogConfirm.push(`${scope} button.mat-mdc-unelevated-button`);
-      dialogConfirm.push(`${scope} button.mdc-button--unelevated`);
-      dialogConfirm.push(`${scope} button.mat-primary`);
+      // 1) Structural: the Material primary/unelevated confirm button —
+      //    locale-independent and most reliable. Enabled-only.
+      dialogConfirm.push(`${scope} button.mat-mdc-unelevated-button${ENABLED}`);
+      dialogConfirm.push(`${scope} button.mdc-button--unelevated${ENABLED}`);
+      dialogConfirm.push(`${scope} button.mat-primary${ENABLED}`);
       // 2) Exact-text (NOT :has-text). :has-text is a case-insensitive
-      //    substring match and was matching the "Загрузить файлы" source-type
+      //    substring match and matched the "Загрузить файлы" source-type
       //    button because its mat-icon ligature renders as the text "upload".
-      //    :text-is requires the WHOLE trimmed text to equal the label, so it
-      //    only ever lands on the real confirm button ("Добавить"/"Вставить").
-      //    NOTE: deliberately no 'upload' key here — that's the source-type
-      //    chooser, not the confirm action.
+      //    :text-is requires the WHOLE trimmed text to equal the label.
+      //    No 'upload' key — that's the source-type chooser, not confirm.
       for (const key of ['add', 'insert'] as const) {
-        dialogConfirm.push(...i18nSelectors(`${scope} button:text-is("{text}")`, 'buttons', key));
+        dialogConfirm.push(
+          ...i18nSelectors(`${scope} button${ENABLED}:text-is("{text}")`, 'buttons', key)
+        );
       }
     }
 
     const uploadBtnSelectors = [
       ...dialogConfirm,
-      // Exact-text generic fallbacks — never the standing add-source/add-note
-      // buttons, and exact-text so we don't catch icon ligatures.
+      // Exact-text generic fallbacks — enabled-only, never the standing
+      // add-source/add-note buttons, exact-text so we don't catch icon ligatures.
       ...i18nSelectors(
-        'button:not(.add-source-button):not(.add-note-button):text-is("{text}")',
+        `button:not(.add-source-button):not(.add-note-button)${ENABLED}:text-is("{text}")`,
         'buttons',
         'insert'
       ),
       ...i18nSelectors(
-        'button:not(.add-source-button):not(.add-note-button):text-is("{text}")',
+        `button:not(.add-source-button):not(.add-note-button)${ENABLED}:text-is("{text}")`,
         'buttons',
         'add'
       ),
-      'button[type="submit"]',
-      // Dialog actions, last resort (still scoped to a dialog/actions container).
-      '.mat-mdc-dialog-actions button:not(:has-text("Cancel")):not(:has-text("Отмена"))',
-      '.mdc-dialog__actions button:not(:has-text("Cancel")):not(:has-text("Отмена"))',
-      '[role="dialog"] button:not(:has-text("Cancel")):not(:has-text("Отмена")):not(:has-text("Close"))',
     ];
 
-    for (const selector of uploadBtnSelectors) {
-      try {
-        const btn = this.page.locator(selector).first();
-        if (await btn.isVisible({ timeout: 500 })) {
-          log.info(`  ✅ Found upload button: ${selector}`);
-          await btn.click();
-          log.info(`  ✅ Clicked upload button`);
-          return;
+    // Poll: the confirm button enables only after Angular registers the text.
+    // Up to ~10s. Re-checks all selectors each pass; clicks the first enabled
+    // match. Deliberately NO blind '[role=dialog] button:not(Cancel)' fallback
+    // — that was clicking the wrong control.
+    for (let attempt = 0; attempt < 20; attempt++) {
+      for (const selector of uploadBtnSelectors) {
+        try {
+          const btn = this.page.locator(selector).first();
+          if (await btn.isVisible({ timeout: 100 })) {
+            log.info(`  ✅ Found enabled confirm button: ${selector}`);
+            await btn.click();
+            log.info(`  ✅ Clicked confirm button`);
+            return;
+          }
+        } catch {
+          continue;
         }
-      } catch {
-        continue;
       }
+      await randomDelay(400, 600);
     }
 
     // Debug: list all buttons in dialog or overlay
