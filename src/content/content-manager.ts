@@ -12,8 +12,6 @@
 import type { Page, Locator, ElementHandle } from 'patchright';
 import path from 'path';
 import { existsSync } from 'fs';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { randomDelay, realisticClick, humanType } from '../utils/stealth-utils.js';
 import { log } from '../utils/logger.js';
 import { CONFIG } from '../config.js';
@@ -22,72 +20,6 @@ import { setLocale, tAll } from '../i18n/index.js';
 
 // Initialize i18n with configured locale
 setLocale(CONFIG.uiLocale);
-
-const execAsync = promisify(exec);
-
-/**
- * Click a locator using a REAL OS-level X11 event via xdotool, not a CDP
- * synthetic event. NotebookLM's behavioural bot-detection silently drops the
- * save-source RPC when the confirm click is a Patchright/CDP "teleport"
- * (proven: a real VNC mouse click on the very same server browser persists
- * the source; the identical CDP click does not). xdotool injects a genuine
- * X11 pointer event into the Xvfb display, indistinguishable from a human.
- *
- * Maps the element's viewport coordinates to absolute screen coordinates via
- * window.screenX/Y + the chrome (toolbar) height, then moves+clicks.
- * Returns false if anything is unavailable so the caller can fall back.
- */
-async function xdotoolClickLocator(page: Page, locator: Locator): Promise<boolean> {
-  try {
-    const box = await locator.boundingBox();
-    if (!box) return false;
-    // Window position + chrome height, read from the page itself.
-    const geom = await page.evaluate(() => ({
-      sx: (globalThis as unknown as { screenX: number }).screenX || 0,
-      sy: (globalThis as unknown as { screenY: number }).screenY || 0,
-      outerH: (globalThis as unknown as { outerHeight: number }).outerHeight || 0,
-      innerH: (globalThis as unknown as { innerHeight: number }).innerHeight || 0,
-      dpr: (globalThis as unknown as { devicePixelRatio: number }).devicePixelRatio || 1,
-    }));
-    // Patchright boundingBox is already relative to the VIEWPORT top-left, and
-    // with the window pinned to (0,0) full-screen the viewport's screen origin
-    // is just window.screenX/screenY — do NOT add the toolbar height (that was
-    // double-counting and pushing the click ~130px below the button).
-    const screenX = Math.round(geom.sx + (box.x + box.width / 2) * geom.dpr);
-    const screenY = Math.round(geom.sy + (box.y + box.height / 2) * geom.dpr);
-    const display = process.env.DISPLAY || ':99';
-    log.info(
-      `  🧭 xdotool geom: box(${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}x${Math.round(box.height)}) ` +
-        `screenXY(${geom.sx},${geom.sy}) outer/inner(${geom.outerH}/${geom.innerH}) dpr=${geom.dpr} → (${screenX},${screenY})`
-    );
-    // Move in two hops (gives a tiny trajectory), then click.
-    // Verify what element actually sits under the target point (viewport
-    // coords = screen − window origin) so we KNOW whether xdotool will hit
-    // the button or miss it — removes the blind-calibration guesswork.
-    const vx = Math.round((box.x + box.width / 2) * geom.dpr);
-    const vy = Math.round((box.y + box.height / 2) * geom.dpr);
-    const hit = await page.evaluate(
-      ({ x, y }) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const el = (globalThis as any).document.elementFromPoint(x, y);
-        return el
-          ? `${el.tagName}.${(el.className || '').toString().slice(0, 40)} "${(el.textContent || '').trim().slice(0, 20)}"`
-          : 'null';
-      },
-      { x: vx, y: vy }
-    );
-    log.info(`  🎯 elementFromPoint(${vx},${vy}) = ${hit}`);
-    await execAsync(
-      `DISPLAY=${display} xdotool mousemove ${screenX - 40} ${screenY - 25} ` +
-        `mousemove --sync ${screenX} ${screenY} click 1`
-    );
-    log.info(`  🖱️ xdotool click at screen (${screenX},${screenY})`);
-    return true;
-  } catch (e) {
-    log.warning(`  ⚠️ xdotool click failed: ${e}`);
-    return false;
-  }
-}
 
 /**
  * Build selectors for all supported locales
@@ -995,28 +927,16 @@ export class ContentManager {
         throw new Error('Text input not found in dialog');
       }
 
-      // Enter text via the NATIVE value setter + dispatched input event.
-      // This is the exact input path that worked in the hand-driven noVNC
-      // test (native-setter text + a real X11 confirm click persisted the
-      // source). The confirm button is clicked separately via xdotool (real
-      // X11 event), so the working VNC combination is reproduced end-to-end.
+      // Enter text with Playwright's fill() — the upstream roomi-fields path
+      // that is reported working (30+ adds/session). Earlier native-setter /
+      // keystroke / xdotool experiments were dead ends layered on while the
+      // real bug was elsewhere (RU i18n disabled + paste-textarea mis-target,
+      // both now fixed); they are removed to return to the proven baseline.
       const setTextareaValue = async (value: string): Promise<void> => {
-        await textInput!.evaluate((el, val) => {
-          /* eslint-disable @typescript-eslint/no-explicit-any */
-          const ta = el as any;
-          ta.focus();
-          const setter = Object.getOwnPropertyDescriptor(
-            (globalThis as any).HTMLTextAreaElement.prototype,
-            'value'
-          )?.set;
-          setter?.call(ta, val);
-          ta.dispatchEvent(new (globalThis as any).Event('input', { bubbles: true }));
-          /* eslint-enable @typescript-eslint/no-explicit-any */
-        }, value);
+        await textInput!.fill(value);
       };
 
       let textToInsert = input.text;
-      await textInput.focus().catch(() => undefined);
       await setTextareaValue(textToInsert);
       log.info(`  ✅ Text entered (${textToInsert.length} chars)`);
 
@@ -1359,20 +1279,8 @@ export class ContentManager {
           const btn = this.page.locator(selector).first();
           if (await btn.isVisible({ timeout: 100 })) {
             log.info(`  ✅ Found enabled confirm button: ${selector}`);
-            // Click via a REAL X11 event (xdotool). NotebookLM's bot-detection
-            // silently rejects the save-source RPC when the confirm click is a
-            // CDP "teleport" (read ops pass, write ops don't). Proven: a real
-            // VNC mouse click on this very same server browser persists the
-            // source; the identical CDP click does not. xdotool injects a
-            // genuine OS-level pointer event into Xvfb.
-            const xok = await xdotoolClickLocator(this.page, btn);
-            if (xok) {
-              log.info(`  ✅ Clicked confirm button (xdotool / real X11 event)`);
-              return;
-            }
-            // Fallback to CDP click if xdotool unavailable.
             await btn.click();
-            log.info(`  ✅ Clicked confirm button (CDP fallback)`);
+            log.info(`  ✅ Clicked confirm button`);
             return;
           }
         } catch {
