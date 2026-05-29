@@ -782,14 +782,21 @@ export class ContentManager {
     log.info(`  📝 Adding text content (${input.text.length} chars)`);
 
     try {
-      // Click on paste text option (bilingual FR/EN via i18n)
+      // Click on the "paste text" source-type option. In the 2026 dialog this
+      // is a <button> whose text is the icon ligature + label, e.g.
+      // "content_pasteСкопированный текст" — the label is NOT wrapped in its
+      // own <span>, so the old span-scoped selectors silently missed it and
+      // the flow proceeded to the source-type chooser, where the FIRST
+      // textarea is the internet-search box (not the paste box). Target the
+      // button/role=button directly.
       const textTypeSelectors = [
-        // Span element with pasted text label
+        ...i18nSelectors('button:has-text("{text}")', 'sourceTypes', 'pastedText'),
+        ...i18nSelectors('[role="button"]:has-text("{text}")', 'sourceTypes', 'pastedText'),
         ...i18nSelectors('span:has-text("{text}")', 'sourceTypes', 'pastedText'),
         ...i18nSelectors(':has-text("{text}")', 'sourceTypes', 'pastedText'),
-        // Parent of the span (clickable area)
         ...i18nSelectors('*:has(> span:has-text("{text}"))', 'sourceTypes', 'pastedText'),
         // Generic fallbacks
+        'button:has-text("Paste text")',
         'span:has-text("Paste text")',
         ':has-text("Paste text")',
         '[data-type="text"]',
@@ -841,19 +848,28 @@ export class ContentManager {
         }
       }
 
-      // Find text input - must be in the dialog, not the chat input
-      log.info(`  🔍 Looking for text input in dialog...`);
+      // Find text input - must be the PASTE textarea, not the internet-search
+      // box. The add-source dialog contains a 'Найдите новые источники в
+      // интернете' search textarea (textarea.query-box-textarea) that appears
+      // FIRST in DOM order; a generic '[role="dialog"] textarea' .first()
+      // landed on it and the pasted text went into web-search instead of a
+      // source. The paste box is specifically textarea.copied-text-input-textarea
+      // (aria-label "Вставленный текст" / placeholder "Вставьте текст").
+      log.info(`  🔍 Looking for the paste textarea...`);
 
-      // Wait for the paste dialog to fully appear
+      // Wait for the paste sub-dialog to fully appear
       await randomDelay(500, 800);
 
-      // Try to find textarea specifically in the dialog context
       const textInputSelectors = [
-        '[role="dialog"] textarea',
-        '.mat-dialog-container textarea',
-        '.mdc-dialog textarea',
-        // Fallback to any visible textarea that's not the chat input
-        'textarea:not(.query-box-input)',
+        // The real paste box — specific class / aria / placeholder first.
+        'textarea.copied-text-input-textarea',
+        'textarea[aria-label="Вставленный текст"]',
+        'textarea[placeholder="Вставьте текст"]',
+        'textarea[aria-label*="Pasted text" i]',
+        'textarea[placeholder*="Paste" i]',
+        // Explicitly NOT the search/chat textareas.
+        'textarea:not(.query-box-textarea):not(.query-box-input)',
+        '[role="dialog"] textarea:not(.query-box-textarea):not(.query-box-input)',
       ];
 
       let textInput = null;
