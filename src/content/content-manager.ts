@@ -3221,21 +3221,66 @@ export class ContentManager {
     const content: GeneratedContent[] = [];
 
     try {
-      // Check for audio overview
-      const audioPlayer = await this.page.$('audio, .audio-player');
-      if (audioPlayer) {
+      // 2026 Studio redesign: generated artifacts render as <artifact-library-item>
+      // cards in the Studio panel (same elements content.download enumerates). The
+      // previous implementation only looked for an <audio> element and explicitly
+      // dropped everything else — so presentations/videos/etc. never appeared and
+      // the tool returned `generatedContent: []` even when a presentation existed.
+      // Enumerate the real cards instead. Non-intrusive: we read each card's text
+      // and never open its kebab menu (so we don't disturb UI state).
+      await this.navigateToStudio();
+      await randomDelay(500, 900);
+
+      // Best-effort type classification from the card's VISIBLE text (RU/EN/FR).
+      // Card titles are often content-derived (no type word) → default 'report';
+      // count + name are always accurate, which is the point of the fix. Card text
+      // is logged below so the token list can be tightened from real data later.
+      const classify = (text: string): ContentType => {
+        const t = text.toLowerCase();
+        if (/презентац|presentation|\bslide|слайд|diaporama|pptx/.test(t)) return 'presentation';
+        if (/видео|\bvideo\b|vidéo/.test(t)) return 'video';
+        if (/инфограф|infographic|infographie/.test(t)) return 'infographic';
+        if (/таблиц|data ?table|tableau|\bcsv\b|sheets/.test(t)) return 'data_table';
+        if (/аудио|\baudio\b|подкаст|podcast|deep dive|\bmp3\b/.test(t)) return 'audio_overview';
+        return 'report';
+      };
+
+      const cards = this.page.locator('artifact-library-item');
+      const count = await cards.count();
+      log.info(`  🔎 Studio sidebar has ${count} artifact card(s)`);
+
+      for (let i = 0; i < count; i++) {
+        const card = cards.nth(i);
+        const raw = (await card.textContent().catch(() => '')) || '';
+        const text = raw.replace(/\s+/g, ' ').trim();
+        const name =
+          text
+            .replace(/\b(more_vert|more_horiz|Ещё|More)\b/gi, '')
+            .trim()
+            .slice(0, 120) || `Artifact ${i + 1}`;
+        log.dim(`    artifact ${i + 1}/${count}: "${text.slice(0, 80)}"`);
         content.push({
-          id: 'audio-overview',
-          type: 'audio_overview',
-          name: 'Audio Overview',
+          id: `artifact-${i}`,
+          type: classify(text),
+          name,
           status: 'ready',
           createdAt: new Date().toISOString(),
         });
       }
 
-      // Note: We only list audio_overview content now since other content types
-      // (briefing_doc, study_guide, etc.) were removed as they were fake implementations.
-      // Any notes in the Studio panel would have been created by the user directly in NotebookLM.
+      // Fallback: no cards found but an <audio> element exists → still report it.
+      if (count === 0) {
+        const audioPlayer = await this.page.$('audio, .audio-player');
+        if (audioPlayer) {
+          content.push({
+            id: 'audio-overview',
+            type: 'audio_overview',
+            name: 'Audio Overview',
+            status: 'ready',
+            createdAt: new Date().toISOString(),
+          });
+        }
+      }
     } catch (error) {
       log.warning(`  ⚠️ Could not list generated content: ${error}`);
     }
