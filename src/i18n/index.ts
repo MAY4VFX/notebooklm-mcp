@@ -201,7 +201,7 @@ export function getLocaleData(): LocaleData {
  * Get all supported locales
  */
 export function getSupportedLocales(): SupportedLocale[] {
-  return ['fr', 'en'];
+  return ['fr', 'en', 'ru'];
 }
 
 /**
