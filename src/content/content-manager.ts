@@ -1165,7 +1165,9 @@ export class ContentManager {
     //
     // So: dialog/overlay-scoped selectors FIRST, and the generic fallbacks
     // explicitly exclude the standing add-source / add-note buttons.
+    // The dialog scopes that contain the confirm button, in priority order.
     const dialogScope = [
+      'add-sources-dialog .mat-mdc-dialog-actions',
       'add-sources-dialog',
       '.mat-mdc-dialog-actions',
       '.mdc-dialog__actions',
@@ -1174,49 +1176,42 @@ export class ContentManager {
     ];
     const dialogConfirm: string[] = [];
     for (const scope of dialogScope) {
-      // The dialog's primary/confirm button (Material "unelevated"/"primary").
+      // 1) Structural: the Material primary/unelevated confirm button. This
+      //    is locale-independent and the most reliable.
       dialogConfirm.push(`${scope} button.mat-mdc-unelevated-button`);
       dialogConfirm.push(`${scope} button.mdc-button--unelevated`);
       dialogConfirm.push(`${scope} button.mat-primary`);
-      // …and the same scoped by localized label.
-      for (const key of ['add', 'insert', 'upload'] as const) {
-        dialogConfirm.push(...i18nSelectors(`${scope} button:has-text("{text}")`, 'buttons', key));
+      // 2) Exact-text (NOT :has-text). :has-text is a case-insensitive
+      //    substring match and was matching the "Загрузить файлы" source-type
+      //    button because its mat-icon ligature renders as the text "upload".
+      //    :text-is requires the WHOLE trimmed text to equal the label, so it
+      //    only ever lands on the real confirm button ("Добавить"/"Вставить").
+      //    NOTE: deliberately no 'upload' key here — that's the source-type
+      //    chooser, not the confirm action.
+      for (const key of ['add', 'insert'] as const) {
+        dialogConfirm.push(...i18nSelectors(`${scope} button:text-is("{text}")`, 'buttons', key));
       }
     }
 
     const uploadBtnSelectors = [
       ...dialogConfirm,
-      // Primary action buttons (most likely) - bilingual via i18n
-      ...i18nSelectors('button.mdc-button--raised:has-text("{text}")', 'buttons', 'insert'),
-      ...i18nSelectors('button.mat-flat-button:has-text("{text}")', 'buttons', 'insert'),
-      ...i18nSelectors('button[color="primary"]:has-text("{text}")', 'buttons', 'insert'),
-      // Generic text patterns — but NEVER the standing add-source/add-note
-      // buttons in the main layout (those re-open the dialog / spawn a new
-      // notebook). :not() guards keep .first() from landing on them.
+      // Exact-text generic fallbacks — never the standing add-source/add-note
+      // buttons, and exact-text so we don't catch icon ligatures.
       ...i18nSelectors(
-        'button:not(.add-source-button):not(.add-note-button):has-text("{text}")',
+        'button:not(.add-source-button):not(.add-note-button):text-is("{text}")',
         'buttons',
         'insert'
       ),
       ...i18nSelectors(
-        'button:not(.add-source-button):not(.add-note-button):has-text("{text}")',
+        'button:not(.add-source-button):not(.add-note-button):text-is("{text}")',
         'buttons',
         'add'
       ),
-      ...i18nSelectors(
-        'button:not(.add-source-button):not(.add-note-button):has-text("{text}")',
-        'buttons',
-        'upload'
-      ),
-      'button:has-text("Import")',
-      'button:has-text("Save")',
-      'button:has-text("Submit")',
-      // Form submit
       'button[type="submit"]',
-      // Dialog actions
-      '[role="dialog"] button:not(:has-text("Cancel")):not(:has-text("Close"))',
-      '.mat-dialog-actions button:not(:has-text("Cancel"))',
-      '.mdc-dialog__actions button:not(:has-text("Cancel"))',
+      // Dialog actions, last resort (still scoped to a dialog/actions container).
+      '.mat-mdc-dialog-actions button:not(:has-text("Cancel")):not(:has-text("Отмена"))',
+      '.mdc-dialog__actions button:not(:has-text("Cancel")):not(:has-text("Отмена"))',
+      '[role="dialog"] button:not(:has-text("Cancel")):not(:has-text("Отмена")):not(:has-text("Close"))',
     ];
 
     for (const selector of uploadBtnSelectors) {
