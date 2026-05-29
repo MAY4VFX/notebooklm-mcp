@@ -939,7 +939,7 @@ export class ContentManager {
         await textInput!.click();
         await this.page.keyboard.press('Control+A').catch(() => undefined);
         await this.page.keyboard.press('Delete').catch(() => undefined);
-        await textInput!.pressSequentially(value, { delay: 4 });
+        await textInput!.type(value, { delay: 4 });
         // Nudge Angular's change detection.
         await textInput!.evaluate((el) => {
           /* eslint-disable @typescript-eslint/no-explicit-any */
