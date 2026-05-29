@@ -55,7 +55,15 @@ ENV NODE_ENV=production \
 
 EXPOSE 3000 6080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+# The HTTP server shares its Node event loop with Patchright/Chromium. During
+# a browser launch or a heavy page operation (add_source, content.generate)
+# the loop is busy and /health briefly returns "Connection refused". With the
+# old 3×30s/10s-start-period policy three such blips in a row marked the
+# container unhealthy and Swarm killed it MID-OPERATION — tearing down the MCP
+# session and the in-flight notebook action. Loosen it so only a genuine
+# multi-minute outage trips it: long start-period for the lazy Chrome boot,
+# and enough retries to ride out any single browser operation.
+HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=10 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
 VOLUME ["/data"]
