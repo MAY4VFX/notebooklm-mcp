@@ -1295,8 +1295,34 @@ export class ContentManager {
           const btn = this.page.locator(selector).first();
           if (await btn.isVisible({ timeout: 100 })) {
             log.info(`  ✅ Found enabled confirm button: ${selector}`);
+            // HUMAN-LIKE CLICK. NotebookLM's bot-detection silently rejects the
+            // save-source RPC when the confirm click is a CDP "teleport" with
+            // no preceding pointer trajectory (read ops pass, write ops don't).
+            // Proven: a real VNC mouse click (with movement) on this very same
+            // server browser DOES persist the source. So move the mouse to the
+            // button in steps, hover, small pause, then click — approximating
+            // genuine pointer input so isTrusted+behavioural signals look human.
+            try {
+              const box = await btn.boundingBox();
+              if (box) {
+                const tx = box.x + box.width / 2;
+                const ty = box.y + box.height / 2;
+                // Move in from a nearby offset in several steps (real trajectory).
+                await this.page.mouse.move(tx - 120, ty - 80, { steps: 6 });
+                await randomDelay(120, 240);
+                await this.page.mouse.move(tx, ty, { steps: 12 });
+                await randomDelay(180, 320);
+                await this.page.mouse.down();
+                await randomDelay(40, 90);
+                await this.page.mouse.up();
+                log.info(`  ✅ Clicked confirm button (human-like pointer)`);
+                return;
+              }
+            } catch (e) {
+              log.warning(`  ⚠️ human-like click failed (${e}), falling back to .click()`);
+            }
             await btn.click();
-            log.info(`  ✅ Clicked confirm button`);
+            log.info(`  ✅ Clicked confirm button (fallback)`);
             return;
           }
         } catch {
