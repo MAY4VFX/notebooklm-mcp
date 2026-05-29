@@ -171,7 +171,11 @@ export class ContentManager {
     }
 
     const addSourceSelectors = [
-      // NotebookLM current UI (Dec 2024) - aria-label based (most reliable)
+      // NotebookLM 2026 UI — aria-label based (most reliable). RU first
+      // because this deployment runs a Russian-locale account.
+      'button.add-source-button',
+      'button[aria-label="Добавить источник"]',
+      'button[aria-label*="Добавить источник"]',
       'button[aria-label="Add source"]',
       'button[aria-label="Ajouter une source"]', // French
       'button[aria-label*="Add source"]',
@@ -1150,15 +1154,60 @@ export class ContentManager {
    * Click the upload/add button
    */
   private async clickUploadButton(): Promise<void> {
+    // CRITICAL: the confirm button MUST be scoped to the open add-sources
+    // dialog. The 2026 NotebookLM home/notebook layout has standing buttons
+    // labelled "Добавить источники" (.add-source-button) and "Добавить
+    // заметку" (.add-note-button) sitting in the main layout. A bare
+    // `button:has-text("Добавить")` with .first() matched .add-source-button
+    // instead of the dialog's "Добавить" button — which re-opened the source
+    // dialog and made NotebookLM spawn a brand-new notebook for the pasted
+    // text (the "redirected to a different notebook / 0 sources" bug).
+    //
+    // So: dialog/overlay-scoped selectors FIRST, and the generic fallbacks
+    // explicitly exclude the standing add-source / add-note buttons.
+    const dialogScope = [
+      'add-sources-dialog',
+      '.mat-mdc-dialog-actions',
+      '.mdc-dialog__actions',
+      '[role="dialog"]',
+      '.cdk-overlay-pane',
+    ];
+    const dialogConfirm: string[] = [];
+    for (const scope of dialogScope) {
+      // The dialog's primary/confirm button (Material "unelevated"/"primary").
+      dialogConfirm.push(`${scope} button.mat-mdc-unelevated-button`);
+      dialogConfirm.push(`${scope} button.mdc-button--unelevated`);
+      dialogConfirm.push(`${scope} button.mat-primary`);
+      // …and the same scoped by localized label.
+      for (const key of ['add', 'insert', 'upload'] as const) {
+        dialogConfirm.push(...i18nSelectors(`${scope} button:has-text("{text}")`, 'buttons', key));
+      }
+    }
+
     const uploadBtnSelectors = [
+      ...dialogConfirm,
       // Primary action buttons (most likely) - bilingual via i18n
       ...i18nSelectors('button.mdc-button--raised:has-text("{text}")', 'buttons', 'insert'),
       ...i18nSelectors('button.mat-flat-button:has-text("{text}")', 'buttons', 'insert'),
       ...i18nSelectors('button[color="primary"]:has-text("{text}")', 'buttons', 'insert'),
-      // Generic text patterns (bilingual via i18n)
-      ...i18nSelectors('button:has-text("{text}")', 'buttons', 'insert'),
-      ...i18nSelectors('button:has-text("{text}")', 'buttons', 'add'),
-      ...i18nSelectors('button:has-text("{text}")', 'buttons', 'upload'),
+      // Generic text patterns — but NEVER the standing add-source/add-note
+      // buttons in the main layout (those re-open the dialog / spawn a new
+      // notebook). :not() guards keep .first() from landing on them.
+      ...i18nSelectors(
+        'button:not(.add-source-button):not(.add-note-button):has-text("{text}")',
+        'buttons',
+        'insert'
+      ),
+      ...i18nSelectors(
+        'button:not(.add-source-button):not(.add-note-button):has-text("{text}")',
+        'buttons',
+        'add'
+      ),
+      ...i18nSelectors(
+        'button:not(.add-source-button):not(.add-note-button):has-text("{text}")',
+        'buttons',
+        'upload'
+      ),
       'button:has-text("Import")',
       'button:has-text("Save")',
       'button:has-text("Submit")',
