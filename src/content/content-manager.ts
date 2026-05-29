@@ -49,13 +49,16 @@ async function xdotoolClickLocator(page: Page, locator: Locator): Promise<boolea
       innerH: (globalThis as unknown as { innerHeight: number }).innerHeight || 0,
       dpr: (globalThis as unknown as { devicePixelRatio: number }).devicePixelRatio || 1,
     }));
-    const chromeH = Math.max(0, geom.outerH - geom.innerH);
+    // Patchright boundingBox is already relative to the VIEWPORT top-left, and
+    // with the window pinned to (0,0) full-screen the viewport's screen origin
+    // is just window.screenX/screenY — do NOT add the toolbar height (that was
+    // double-counting and pushing the click ~130px below the button).
     const screenX = Math.round(geom.sx + (box.x + box.width / 2) * geom.dpr);
-    const screenY = Math.round(geom.sy + chromeH + (box.y + box.height / 2) * geom.dpr);
+    const screenY = Math.round(geom.sy + (box.y + box.height / 2) * geom.dpr);
     const display = process.env.DISPLAY || ':99';
     log.info(
       `  🧭 xdotool geom: box(${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}x${Math.round(box.height)}) ` +
-        `screenXY(${geom.sx},${geom.sy}) outer/inner(${geom.outerH}/${geom.innerH}) chromeH=${chromeH} dpr=${geom.dpr} → (${screenX},${screenY})`
+        `screenXY(${geom.sx},${geom.sy}) outer/inner(${geom.outerH}/${geom.innerH}) dpr=${geom.dpr} → (${screenX},${screenY})`
     );
     // Move in two hops (gives a tiny trajectory), then click.
     await execAsync(
