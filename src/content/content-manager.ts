@@ -68,10 +68,8 @@ async function xdotoolClickLocator(page: Page, locator: Locator): Promise<boolea
     const vy = Math.round((box.y + box.height / 2) * geom.dpr);
     const hit = await page.evaluate(
       ({ x, y }) => {
-        const el = (globalThis as unknown as { document: Document }).document.elementFromPoint(
-          x,
-          y
-        );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const el = (globalThis as any).document.elementFromPoint(x, y);
         return el
           ? `${el.tagName}.${(el.className || '').toString().slice(0, 40)} "${(el.textContent || '').trim().slice(0, 20)}"`
           : 'null';
