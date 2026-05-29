@@ -43,6 +43,8 @@ export interface SourceUploadResult {
   error?: string;
   /** Processing status */
   status?: 'processing' | 'ready' | 'failed';
+  /** Number of sources observed after the post-add verification poll. */
+  verifiedSourceCount?: number;
 }
 
 /**

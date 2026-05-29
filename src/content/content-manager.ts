@@ -2498,7 +2498,7 @@ export class ContentManager {
     return rows.map((row) => row.name);
   }
 
-  private async getAllSourceLabels(): Promise<string[]> {
+  async getAllSourceLabels(): Promise<string[]> {
     const rows = await this.getVisibleSourceRows(false);
     return rows.map((row) => row.name);
   }

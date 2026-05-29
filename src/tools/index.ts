@@ -2774,6 +2774,16 @@ export class ToolHandlers {
       // Create content manager
       const contentManager = new ContentManager(page);
 
+      // Snapshot the source list BEFORE the upload so we can verify the
+      // source actually landed (not just that a toast/redirect happened).
+      let baselineCount = -1;
+      try {
+        baselineCount = (await contentManager.getAllSourceLabels()).length;
+        log.info(`  📊 Sources before add: ${baselineCount}`);
+      } catch {
+        /* non-fatal — verification just degrades to "any source present" */
+      }
+
       // Add source
       const result = await contentManager.addSource({
         type: source_type,
@@ -2783,16 +2793,45 @@ export class ToolHandlers {
         title,
       });
 
-      if (result.success) {
-        log.success(`✅ [TOOL] add_source completed`);
-      } else {
+      if (!result.success) {
         log.error(`❌ [TOOL] add_source failed: ${result.error}`);
+        return { success: false, data: result, error: result.error };
       }
 
+      // VERIFY: do not trust the upload helper's own success flag. Re-read the
+      // source list and require that the count actually grew (or, if we
+      // couldn't take a baseline, that at least one source now exists).
+      // NotebookLM ingests asynchronously, so poll for a few seconds.
+      let verifiedCount = baselineCount;
+      let verified = false;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        try {
+          verifiedCount = (await contentManager.getAllSourceLabels()).length;
+        } catch {
+          continue;
+        }
+        if (baselineCount >= 0 ? verifiedCount > baselineCount : verifiedCount > 0) {
+          verified = true;
+          break;
+        }
+      }
+
+      if (!verified) {
+        const msg = `add_source reported success but verification failed: source count did not increase (before=${baselineCount}, after=${verifiedCount}). The source did NOT land in the notebook.`;
+        log.error(`❌ [TOOL] ${msg}`);
+        return {
+          success: false,
+          data: { ...result, success: false, verifiedSourceCount: verifiedCount },
+          error: msg,
+        };
+      }
+
+      log.success(`✅ [TOOL] add_source completed & verified (sources now: ${verifiedCount})`);
       return {
-        success: result.success,
-        data: result,
-        error: result.error,
+        success: true,
+        data: { ...result, verifiedSourceCount: verifiedCount },
+        error: undefined,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -3794,26 +3833,45 @@ export class ToolHandlers {
         await sendProgress?.('Clicking create button...', 2, 5);
         log.info('  🖱️  Looking for Create notebook button...');
 
-        // Look for "Create" or "Créer" button
+        // Look for the "Create notebook" button. The 2026 NotebookLM home
+        // page has two: a tonal button in the top toolbar
+        //   button.create-new-button[aria-label="Создать блокнот"/"Create notebook"]
+        // and a card tile
+        //   mat-card.create-new-action-button
+        // The accessible label is localized ("Создать блокнот" in RU,
+        // "Create notebook" in EN, "Créer un notebook" in FR), so we match
+        // by stable CSS class first, then localized aria-labels / text.
         const createButtonSelectors = [
+          // Stable structural selectors (locale-independent) — preferred.
+          'button.create-new-button',
+          'mat-card.create-new-action-button',
+          // Localized aria-labels.
+          'button[aria-label="Создать блокнот"]',
+          'button[aria-label="Create notebook"]',
+          'button[aria-label*="Создать блокнот"]',
+          'button[aria-label*="Create notebook"]',
+          'button[aria-label*="Créer"]',
+          '[role="button"][aria-label*="Создать"]',
+          '[role="button"][aria-label*="Create"]',
+          // Localized visible text (icon ligature "add" is part of textContent).
+          'button:has-text("Создать блокнот")',
+          'button:has-text("Создать")',
+          'button:has-text("Create notebook")',
           'button:has-text("Create")',
           'button:has-text("Créer")',
-          'button:has-text("New notebook")',
-          'button:has-text("Nouveau")',
-          '[aria-label*="Create"]',
-          '[aria-label*="Créer"]',
+          'button:has-text("Новый блокнот")',
+          // Legacy fallback.
           '.create-notebook-button',
-          'button.mdc-button:has-text("Create")',
         ];
 
         let clicked = false;
         for (const selector of createButtonSelectors) {
           try {
             const btn = page.locator(selector).first();
-            if (await btn.isVisible({ timeout: 2000 })) {
+            if (await btn.isVisible({ timeout: 1500 })) {
               await btn.click();
               clicked = true;
-              log.success(`  ✅ Clicked: ${selector}`);
+              log.success(`  ✅ Clicked create button: ${selector}`);
               break;
             }
           } catch {
@@ -3822,21 +3880,26 @@ export class ToolHandlers {
         }
 
         if (!clicked) {
-          // Try finding any button with "+" icon or create text
-          const allButtons = await page.locator('button').all();
+          // Last resort: scan every visible button for a create-ish label.
+          const allButtons = await page.locator('button, [role="button"]').all();
           for (const btn of allButtons) {
-            const text = await btn.textContent();
-            if (text && (text.includes('Create') || text.includes('Créer') || text.includes('+'))) {
+            if (!(await btn.isVisible().catch(() => false))) continue;
+            const text = (await btn.textContent().catch(() => '')) || '';
+            const aria = (await btn.getAttribute('aria-label').catch(() => '')) || '';
+            const hay = `${text} ${aria}`;
+            if (/Создать|Create|Créer|Новый блокнот/i.test(hay)) {
               await btn.click();
               clicked = true;
-              log.success(`  ✅ Clicked button with text: ${text}`);
+              log.success(`  ✅ Clicked create button via scan: "${hay.trim().slice(0, 40)}"`);
               break;
             }
           }
         }
 
         if (!clicked) {
-          throw new Error('Could not find Create notebook button');
+          throw new Error(
+            'Could not find Create notebook button (tried class, aria-label and text in RU/EN/FR)'
+          );
         }
 
         await sendProgress?.('Waiting for notebook creation...', 3, 5);
