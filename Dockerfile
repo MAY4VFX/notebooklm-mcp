@@ -8,6 +8,17 @@ RUN apt-get update && apt-get install -y \
     fonts-liberation fonts-noto-color-emoji wget ca-certificates procps \
     && rm -rf /var/lib/apt/lists/*
 
+# Install REAL Google Chrome (stable). NotebookLM silently refuses write
+# operations (add source) when it detects the Patchright/chromium headless
+# environment — read ops (ask, download) still work, but creating a source
+# never persists and no save RPC is even sent. Running through the genuine
+# google-chrome-stable channel (BROWSER_CHANNEL=chrome) avoids that detection.
+RUN wget -q -O /usr/share/keyrings/google-chrome.gpg.asc https://dl.google.com/linux/linux_signing_key.pub \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg.asc] http://dl.google.com/linux/chrome/deb/ stable main" \
+       > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd -r notebooklm && useradd -r -g notebooklm -d /home/notebooklm notebooklm \
     && mkdir -p /home/notebooklm /app /data \
     && chown -R notebooklm:notebooklm /home/notebooklm /app /data \
@@ -37,7 +48,8 @@ COPY --chown=notebooklm:notebooklm scripts/ ./scripts/
 # Supprimer les devDependencies après le build
 RUN npm prune --omit=dev
 
-# Installer le browser
+# Installer le browser. chromium stays as a fallback; google-chrome-stable
+# (installed above) is used at runtime via BROWSER_CHANNEL=chrome.
 RUN npx patchright install chromium
 
 USER root
