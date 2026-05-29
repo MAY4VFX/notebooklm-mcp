@@ -197,6 +197,10 @@ export class SharedContextManager {
         '--disable-dev-shm-usage',
         '--no-first-run',
         '--no-default-browser-check',
+        // Pin the window to (0,0) at the full Xvfb screen size so xdotool's
+        // viewport→screen coordinate mapping is exact (window.screenX/Y = 0).
+        '--window-position=0,0',
+        '--window-size=1280,800',
         // Docker-specific flags
         '--no-sandbox',
         '--disable-setuid-sandbox',

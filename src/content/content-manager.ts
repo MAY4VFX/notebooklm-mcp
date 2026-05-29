@@ -53,6 +53,10 @@ async function xdotoolClickLocator(page: Page, locator: Locator): Promise<boolea
     const screenX = Math.round(geom.sx + (box.x + box.width / 2) * geom.dpr);
     const screenY = Math.round(geom.sy + chromeH + (box.y + box.height / 2) * geom.dpr);
     const display = process.env.DISPLAY || ':99';
+    log.info(
+      `  🧭 xdotool geom: box(${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}x${Math.round(box.height)}) ` +
+        `screenXY(${geom.sx},${geom.sy}) outer/inner(${geom.outerH}/${geom.innerH}) chromeH=${chromeH} dpr=${geom.dpr} → (${screenX},${screenY})`
+    );
     // Move in two hops (gives a tiny trajectory), then click.
     await execAsync(
       `DISPLAY=${display} xdotool mousemove ${screenX - 40} ${screenY - 25} ` +
