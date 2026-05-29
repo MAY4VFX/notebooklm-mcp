@@ -2774,51 +2774,74 @@ export class ToolHandlers {
       // Create content manager
       const contentManager = new ContentManager(page);
 
-      // Snapshot the source list BEFORE the upload so we can verify the
-      // source actually landed (not just that a toast/redirect happened).
-      let baselineCount = -1;
-      try {
-        baselineCount = (await contentManager.getAllSourceLabels()).length;
-        log.info(`  📊 Sources before add: ${baselineCount}`);
-      } catch {
-        /* non-fatal — verification just degrades to "any source present" */
-      }
-
-      // Add source
-      const result = await contentManager.addSource({
-        type: source_type,
-        filePath: file_path,
-        url,
-        text,
-        title,
-      });
-
-      if (!result.success) {
-        log.error(`❌ [TOOL] add_source failed: ${result.error}`);
-        return { success: false, data: result, error: result.error };
-      }
-
-      // VERIFY: do not trust the upload helper's own success flag. Re-read the
-      // source list and require that the count actually grew (or, if we
-      // couldn't take a baseline, that at least one source now exists).
-      // NotebookLM ingests asynchronously, so poll for a few seconds.
-      let verifiedCount = baselineCount;
+      // RETRY LOOP. A freshly-created (empty) notebook is not fully
+      // materialised on NotebookLM's backend for a few seconds, so the FIRST
+      // source added right after notebook.create silently doesn't persist
+      // (UI clicks all succeed, dialog closes, but the source never appears).
+      // A second attempt against the now-settled notebook works. So we run
+      // add+verify up to 3 times, only returning success once verification
+      // confirms the source count grew.
+      const MAX_ADD_ATTEMPTS = 3;
+      let result = { success: false, error: 'not attempted' } as Awaited<
+        ReturnType<typeof contentManager.addSource>
+      >;
+      let verifiedCount = -1;
       let verified = false;
-      for (let attempt = 0; attempt < 6; attempt++) {
-        await new Promise((r) => setTimeout(r, 2000));
+
+      for (let tryNo = 1; tryNo <= MAX_ADD_ATTEMPTS && !verified; tryNo++) {
+        // Snapshot the source list BEFORE this attempt.
+        let baselineCount = -1;
         try {
-          verifiedCount = (await contentManager.getAllSourceLabels()).length;
+          baselineCount = (await contentManager.getAllSourceLabels()).length;
+          log.info(`  📊 [attempt ${tryNo}] sources before add: ${baselineCount}`);
         } catch {
+          /* non-fatal — verification degrades to "any source present" */
+        }
+
+        result = await contentManager.addSource({
+          type: source_type,
+          filePath: file_path,
+          url,
+          text,
+          title,
+        });
+
+        if (!result.success) {
+          log.warning(`⚠️ [TOOL] add_source attempt ${tryNo} returned failure: ${result.error}`);
+          // Re-navigate to a clean state before the next attempt.
+          if (tryNo < MAX_ADD_ATTEMPTS) {
+            await new Promise((r) => setTimeout(r, 3000));
+          }
           continue;
         }
-        if (baselineCount >= 0 ? verifiedCount > baselineCount : verifiedCount > 0) {
-          verified = true;
-          break;
+
+        // VERIFY: re-read the source list; require the count to grow.
+        verifiedCount = baselineCount;
+        for (let poll = 0; poll < 6; poll++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            verifiedCount = (await contentManager.getAllSourceLabels()).length;
+          } catch {
+            continue;
+          }
+          if (baselineCount >= 0 ? verifiedCount > baselineCount : verifiedCount > 0) {
+            verified = true;
+            break;
+          }
+        }
+
+        if (!verified) {
+          log.warning(
+            `⚠️ [TOOL] add_source attempt ${tryNo}: source count did not grow (before=${baselineCount}, after=${verifiedCount}) — retrying`
+          );
+          if (tryNo < MAX_ADD_ATTEMPTS) {
+            await new Promise((r) => setTimeout(r, 3000));
+          }
         }
       }
 
       if (!verified) {
-        const msg = `add_source reported success but verification failed: source count did not increase (before=${baselineCount}, after=${verifiedCount}). The source did NOT land in the notebook.`;
+        const msg = `add_source failed verification after ${MAX_ADD_ATTEMPTS} attempts: source count never increased. The source did NOT land in the notebook.`;
         log.error(`❌ [TOOL] ${msg}`);
         return {
           success: false,
