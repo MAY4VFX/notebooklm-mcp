@@ -2948,19 +2948,22 @@ export class ToolHandlers {
   /**
    * Handle generate_content tool
    */
-  async handleGenerateContent(args: {
-    content_type: ContentType;
-    custom_instructions?: string;
-    notebook_url?: string;
-    session_id?: string;
-    language?: string;
-    video_style?: VideoStyle;
-    video_format?: VideoFormat;
-    infographic_format?: InfographicFormat;
-    report_format?: ReportFormat;
-    presentation_style?: PresentationStyle;
-    presentation_length?: PresentationLength;
-  }): Promise<ToolResult<ContentGenerationResult>> {
+  async handleGenerateContent(
+    args: {
+      content_type: ContentType;
+      custom_instructions?: string;
+      notebook_url?: string;
+      session_id?: string;
+      language?: string;
+      video_style?: VideoStyle;
+      video_format?: VideoFormat;
+      infographic_format?: InfographicFormat;
+      report_format?: ReportFormat;
+      presentation_style?: PresentationStyle;
+      presentation_length?: PresentationLength;
+    },
+    sendProgress?: ProgressCallback
+  ): Promise<ToolResult<ContentGenerationResult>> {
     const {
       content_type,
       custom_instructions,
@@ -3012,18 +3015,46 @@ export class ToolHandlers {
       // Create content manager
       const contentManager = new ContentManager(page);
 
+      // Long-running generation (presentation/video routinely take 7–15 min). During
+      // the wait we MUST do two things or the call fails:
+      //   1. Emit periodic progress so the MCP client doesn't hit its ~60s idle
+      //      timeout — that idle drop is exactly the `IncompleteRead(0 bytes read)`
+      //      the caller sees.
+      //   2. Touch session.updateActivity() so the idle-reaper (SESSION_TIMEOUT,
+      //      default 900s == presentation waitTimeout) doesn't close the page
+      //      mid-generation ("Target page... has been closed").
+      // A single keepalive interval covers both. The browser work is fully async,
+      // so the event loop stays free and this interval fires reliably.
+      await sendProgress?.(`Starting ${content_type} generation…`, 1, 100);
+      let elapsedS = 0;
+      const keepAlive = setInterval(() => {
+        elapsedS += 15;
+        session.updateActivity();
+        void sendProgress?.(
+          `Generating ${content_type}… ${elapsedS}s elapsed (can take several minutes)`,
+          Math.min(95, elapsedS),
+          100
+        );
+      }, 15000);
+
       // Generate content with all options
-      const result = await contentManager.generateContent({
-        type: content_type,
-        customInstructions: custom_instructions,
-        language,
-        videoStyle: video_style,
-        videoFormat: video_format,
-        infographicFormat: infographic_format,
-        reportFormat: report_format,
-        presentationStyle: presentation_style,
-        presentationLength: presentation_length,
-      });
+      let result: ContentGenerationResult;
+      try {
+        result = await contentManager.generateContent({
+          type: content_type,
+          customInstructions: custom_instructions,
+          language,
+          videoStyle: video_style,
+          videoFormat: video_format,
+          infographicFormat: infographic_format,
+          reportFormat: report_format,
+          presentationStyle: presentation_style,
+          presentationLength: presentation_length,
+        });
+      } finally {
+        clearInterval(keepAlive);
+      }
+      await sendProgress?.(`${content_type} generation finished`, 100, 100);
 
       if (result.success) {
         log.success(`✅ [TOOL] generate_content completed`);
