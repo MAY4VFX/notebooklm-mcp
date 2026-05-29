@@ -3791,6 +3791,20 @@ export class ContentManager {
         await kebab.click();
         await randomDelay(300, 500);
 
+        // DIAGNOSTIC (temporary): dump the ACTUAL menu items so we learn the real
+        // export label/flow for the current UI instead of guessing. Logged as
+        // EXPORT-PROBE; removed once the export path is confirmed.
+        try {
+          const menuItems = await this.page.locator('[role="menuitem"]').allInnerTexts();
+          log.info(
+            `  🔎 EXPORT-PROBE card ${i + 1}/${maxCardsToTry} text="${cardText}" menu=${JSON.stringify(
+              menuItems.map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean)
+            )}`
+          );
+        } catch (probeErr) {
+          log.warning(`  🔎 EXPORT-PROBE failed: ${probeErr}`);
+        }
+
         let pdfItem: ReturnType<typeof this.page.locator> | null = null;
         for (const sel of pdfSelectors) {
           const el = this.page.locator(sel).first();
