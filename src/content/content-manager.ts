@@ -85,6 +85,32 @@ export class ContentManager {
   async addSource(input: SourceUploadInput): Promise<SourceUploadResult> {
     log.info(`📄 Adding source: ${input.type}`);
 
+    // TEMP NETWORK DIAGNOSTICS: log failed requests and non-2xx RPC responses
+    // to Google endpoints during the add, to see whether the save/upload RPC
+    // is being blocked or erroring (proxy filtering hypothesis).
+    const onReqFailed = (req: {
+      url: () => string;
+      failure: () => { errorText: string } | null;
+    }) => {
+      const u = req.url();
+      if (/google|notebooklm|gstatic|googleusercontent/.test(u)) {
+        log.warning(
+          `  🌐❌ requestfailed ${req.failure()?.errorText || '?'} :: ${u.slice(0, 140)}`
+        );
+      }
+    };
+    const onResp = (resp: { status: () => number; url: () => string }) => {
+      const s = resp.status();
+      const u = resp.url();
+      if (s >= 400 && /batchexecute|upload|notebooklm|_\/LabsTailwind/.test(u)) {
+        log.warning(`  🌐⚠️ HTTP ${s} :: ${u.slice(0, 140)}`);
+      }
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.page.on('requestfailed', onReqFailed as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.page.on('response', onResp as any);
+
     // CRITICAL: Capture initial URL BEFORE any action
     // NotebookLM may redirect when clicking "Add source" button!
     const initialUrl = this.page.url();
