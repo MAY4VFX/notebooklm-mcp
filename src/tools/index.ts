@@ -4042,63 +4042,34 @@ export class ToolHandlers {
         if (name) {
           log.info(`  📝 Attempting rename to: ${name}`);
 
-          // DIAGNOSTIC (temporary): capture the real title-bar DOM so the rename
-          // uses the actual 2026 RU selector instead of guessing. Logged as
-          // RENAME-PROBE; removed once the selector is confirmed.
-          try {
-            // Note: tsconfig has no DOM lib, so we avoid document/Element types
-            // and reach DOM globals through a typed cast (same style as the
-            // existing el.evaluate((node: unknown) => …) below).
-            const probe = await page.evaluate(() => {
-              type Elish = {
-                tagName: string;
-                getAttribute(n: string): string | null;
-                innerText?: string;
-                textContent: string | null;
-              };
-              const d = (
-                globalThis as unknown as {
-                  document?: { querySelectorAll(s: string): ArrayLike<Elish> };
-                }
-              ).document;
-              const defaults = ['Untitled notebook', 'Новый блокнот', 'Без названия'];
-              const seen: Array<Record<string, string | null>> = [];
-              if (!d) return seen;
-              const describe = (el: Elish, why: string) => {
-                seen.push({
-                  why,
-                  tag: (el.tagName || '').toLowerCase(),
-                  role: el.getAttribute('role'),
-                  ariaLabel: el.getAttribute('aria-label'),
-                  placeholder: el.getAttribute('placeholder'),
-                  contenteditable: el.getAttribute('contenteditable'),
-                  cls: (el.getAttribute('class') || '').slice(0, 100),
-                  text: (el.innerText || el.textContent || '')
-                    .replace(/\s+/g, ' ')
-                    .trim()
-                    .slice(0, 50),
-                });
-              };
-              Array.from(
-                d.querySelectorAll(
-                  'h1,h2,[role="heading"],[contenteditable],input,textarea,[role="textbox"]'
-                )
-              ).forEach((el) => describe(el, 'editable-or-heading'));
-              Array.from(d.querySelectorAll('span,div')).forEach((el) => {
-                const t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-                if (defaults.includes(t)) describe(el, 'default-title-text');
-              });
-              return seen.slice(0, 30);
-            });
-            log.info(`  🔎 RENAME-PROBE (${probe.length}): ${JSON.stringify(probe)}`);
-          } catch (probeErr) {
-            log.warning(`  🔎 RENAME-PROBE failed: ${probeErr}`);
+          // The post-create `?addSource=true` dialog is MODAL and sits over the
+          // title field, so it intercepts clicks. Dismiss it first (close button,
+          // else Escape) — the notebook already exists, so this just leaves it
+          // empty and reveals the header title input.
+          const addDialog = page
+            .locator('add-sources-dialog, mat-dialog-container, .mat-mdc-dialog-container')
+            .first();
+          if (await addDialog.isVisible({ timeout: 1000 }).catch(() => false)) {
+            const closeBtn = addDialog
+              .locator(
+                'button[aria-label="Закрыть"], button[aria-label="Close"], button[mat-dialog-close], button.close-button'
+              )
+              .first();
+            if (await closeBtn.isVisible({ timeout: 500 }).catch(() => false)) {
+              await closeBtn.click().catch(() => undefined);
+            } else {
+              await page.keyboard.press('Escape').catch(() => undefined);
+            }
+            await randomDelay(600, 1000);
           }
 
-          // Most-specific selectors first: aria-label or placeholder that
-          // explicitly indicate "title" / "Untitled". Generic contenteditable
-          // is the last resort.
+          // Confirmed via live 2026 RU DOM (RENAME-PROBE): the title field is a
+          // plain `<input class="title-input mat-title-large">` with NO aria-label
+          // and NO placeholder — which is exactly why every previous selector
+          // missed it. Target the class directly; keep the old attribute-based
+          // selectors as fallbacks for other locales/UI revisions.
           const titleSelectors: Array<{ sel: string; via: 'fill' | 'type' }> = [
+            { sel: 'input.title-input', via: 'fill' },
             { sel: 'input[aria-label*="title" i]', via: 'fill' },
             { sel: 'input[aria-label*="titre" i]', via: 'fill' },
             { sel: 'input[placeholder*="Untitled" i]', via: 'fill' },
@@ -4125,7 +4096,9 @@ export class ToolHandlers {
                 });
                 await page.keyboard.type(name, { delay: 30 });
               }
-              await page.keyboard.press('Tab'); // commit the edit
+              // Commit: Enter commits the title, Tab/blur persists it to the backend.
+              await page.keyboard.press('Enter').catch(() => undefined);
+              await page.keyboard.press('Tab').catch(() => undefined);
               await randomDelay(800, 1300);
 
               // Verify by reading what's actually in the title element now.
