@@ -927,25 +927,28 @@ export class ContentManager {
         throw new Error('Text input not found in dialog');
       }
 
-      // Set the textarea value via the NATIVE setter + a bubbling 'input'
-      // event rather than Playwright's fill(). On this Angular-Material paste
-      // textarea, fill() leaves the value visible and even enables the
-      // confirm button, but the reactive form doesn't treat it as a committed
-      // value — clicking "Добавить" then closes the dialog WITHOUT creating a
-      // source (verified: identical native-setter+dispatch path DOES create
-      // the source, fill() does not). React/Angular only react to the value
-      // setter's side-effect when the 'input' event is dispatched this way.
+      // Enter the text by REAL keystrokes (pressSequentially), not a
+      // programmatic value-set. In the headless/Xvfb server browser, setting
+      // the value via the native setter + input event enables the confirm
+      // button but Angular's reactive FormControl doesn't commit it, so
+      // clicking "Добавить" closes the dialog and saves NOTHING (0 sources,
+      // no save RPC even fires). Real per-character key events drive the
+      // CDK textarea through its normal input pipeline and the value sticks.
+      // We click to focus, select-all + delete to clear, then type.
       const setTextareaValue = async (value: string): Promise<void> => {
-        await textInput!.evaluate((el, val) => {
+        await textInput!.click();
+        await this.page.keyboard.press('Control+A').catch(() => undefined);
+        await this.page.keyboard.press('Delete').catch(() => undefined);
+        await textInput!.pressSequentially(value, { delay: 4 });
+        // Nudge Angular's change detection.
+        await textInput!.evaluate((el) => {
           /* eslint-disable @typescript-eslint/no-explicit-any */
-          const ta = el as any;
-          const proto = (globalThis as any).HTMLTextAreaElement.prototype;
-          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-          setter?.call(ta, val);
-          ta.dispatchEvent(new (globalThis as any).Event('input', { bubbles: true }));
-          ta.dispatchEvent(new (globalThis as any).Event('change', { bubbles: true }));
+          (el as any).dispatchEvent(new (globalThis as any).Event('input', { bubbles: true }));
+          (el as any).dispatchEvent(new (globalThis as any).Event('change', { bubbles: true }));
+          (el as any).blur?.();
+          (el as any).focus?.();
           /* eslint-enable @typescript-eslint/no-explicit-any */
-        }, value);
+        });
       };
 
       let textToInsert = input.text;
