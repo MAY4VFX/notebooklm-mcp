@@ -131,7 +131,26 @@ export class ContentGenerator {
 
         log.info(`  Started ${config.displayName} generation via Studio button`);
 
-        // Wait for generation to complete
+        // ASYNC BY DEFAULT. Generation runs server-side in Google and can take
+        // 7-15 min. The in-page completion detector below (waitForContentGeneration)
+        // is unreliable in the 2026 UI — it scans for stale `.presentation-card` /
+        // EN-FR labels and false-times-out even when the artifact WAS created
+        // (verified: a presentation that "timed out" was still downloadable). So
+        // unless the caller explicitly opts into blocking, return as soon as
+        // generation has been triggered; the caller polls content.download /
+        // content.list to retrieve the finished artifact.
+        if (!input.waitForCompletion) {
+          log.success(
+            `  ✅ ${config.displayName} generation triggered (async) — poll content.download to retrieve`
+          );
+          return {
+            success: true,
+            contentType: input.type,
+            status: 'generating',
+          };
+        }
+
+        // Wait for generation to complete (opt-in; unreliable in current UI)
         const waitResult = await this.waitForContentGeneration(input.type, config);
 
         if (waitResult.ready) {

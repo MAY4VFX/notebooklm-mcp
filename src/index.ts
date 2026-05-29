@@ -570,6 +570,7 @@ export class NotebookLMMCPServer {
                 custom_instructions?: string;
                 notebook_url?: string;
                 session_id?: string;
+                wait_for_completion?: boolean;
               },
               sendProgress
             );

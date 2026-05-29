@@ -148,6 +148,16 @@ export interface ContentGenerationInput {
   /** Language for generated content */
   language?: string;
 
+  /**
+   * If true, block until the in-page detector reports completion. Legacy and
+   * UNRELIABLE in the 2026 NotebookLM UI — the detector scans for stale
+   * `.presentation-card` / EN-FR labels and routinely false-times-out even when
+   * the artifact was actually created server-side. Default (false): return as soon
+   * as generation has been triggered and let the caller poll
+   * `content.download` / `content.list` to retrieve the finished artifact.
+   */
+  waitForCompletion?: boolean;
+
   // ============================================================================
   // Type-specific options
   // ============================================================================
@@ -193,6 +203,8 @@ export interface ContentGenerationResult {
   googleSheetsUrl?: string;
   /** Google Slides URL (for presentation export) */
   googleSlidesUrl?: string;
+  /** Human-readable note for the caller (e.g. async "generating" guidance) */
+  note?: string;
 }
 
 /**

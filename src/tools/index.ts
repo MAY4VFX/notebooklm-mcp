@@ -1132,7 +1132,12 @@ User: "Yes" → call remove_notebook`,
         'These content types use real NotebookLM Studio UI buttons or the generic ContentGenerator ' +
         'architecture that navigates the Studio panel and falls back to chat-based generation.\n\n' +
         'NOTE: Other content types (faq, study_guide, timeline, table_of_contents) ' +
-        'are NOT currently implemented. For document-style content, use the ask_question tool.',
+        'are NOT currently implemented. For document-style content, use the ask_question tool.\n\n' +
+        'ASYNC BY DEFAULT: generation runs server-side in NotebookLM and takes 5–10 min. ' +
+        'This tool returns immediately with status="generating" — it does NOT wait or return the ' +
+        'artifact. Poll download_content (same content_type + notebook_url) every ~60s to retrieve ' +
+        'the result once ready. Set wait_for_completion=true to block until done (legacy; unreliable ' +
+        'in the current UI and may false-timeout even when the artifact was created).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1171,6 +1176,14 @@ User: "Yes" → call remove_notebook`,
           session_id: {
             type: 'string',
             description: 'Session ID to reuse an existing session',
+          },
+          wait_for_completion: {
+            type: 'boolean',
+            description:
+              'Default false (recommended): trigger generation and return status="generating" ' +
+              'immediately; poll download_content to retrieve. true: block until the in-page ' +
+              'detector reports done — legacy/unreliable in the current UI, can false-timeout after ' +
+              '15 min even when the artifact was actually created.',
           },
         },
         required: ['content_type'],
@@ -2961,6 +2974,7 @@ export class ToolHandlers {
       report_format?: ReportFormat;
       presentation_style?: PresentationStyle;
       presentation_length?: PresentationLength;
+      wait_for_completion?: boolean;
     },
     sendProgress?: ProgressCallback
   ): Promise<ToolResult<ContentGenerationResult>> {
@@ -2976,6 +2990,7 @@ export class ToolHandlers {
       report_format,
       presentation_style,
       presentation_length,
+      wait_for_completion,
     } = args;
 
     log.info(`🔧 [TOOL] generate_content called`);
@@ -3015,16 +3030,15 @@ export class ToolHandlers {
       // Create content manager
       const contentManager = new ContentManager(page);
 
-      // Long-running generation (presentation/video routinely take 7–15 min). During
-      // the wait we MUST do two things or the call fails:
-      //   1. Emit periodic progress so the MCP client doesn't hit its ~60s idle
-      //      timeout — that idle drop is exactly the `IncompleteRead(0 bytes read)`
-      //      the caller sees.
-      //   2. Touch session.updateActivity() so the idle-reaper (SESSION_TIMEOUT,
-      //      default 900s == presentation waitTimeout) doesn't close the page
-      //      mid-generation ("Target page... has been closed").
-      // A single keepalive interval covers both. The browser work is fully async,
-      // so the event loop stays free and this interval fires reliably.
+      // By default generation is ASYNC: we trigger it and return in seconds, so
+      // there is no long blocking call to drop. The keepalive below only matters
+      // for the opt-in blocking path (wait_for_completion=true), where the wait can
+      // run 7–15 min. In that case it does two things or the call fails:
+      //   1. Emits periodic progress so the MCP client doesn't hit its ~60s idle
+      //      timeout — that idle drop is exactly the `IncompleteRead(0 bytes read)`.
+      //   2. Touches session.updateActivity() so the idle-reaper (SESSION_TIMEOUT,
+      //      default 900s) doesn't close the page mid-generation.
+      // Browser work is fully async so the event loop stays free and it fires.
       await sendProgress?.(`Starting ${content_type} generation…`, 1, 100);
       let elapsedS = 0;
       const keepAlive = setInterval(() => {
@@ -3050,13 +3064,25 @@ export class ToolHandlers {
           reportFormat: report_format,
           presentationStyle: presentation_style,
           presentationLength: presentation_length,
+          waitForCompletion: wait_for_completion ?? false,
         });
       } finally {
         clearInterval(keepAlive);
       }
       await sendProgress?.(`${content_type} generation finished`, 100, 100);
 
-      if (result.success) {
+      if (result.success && result.status === 'generating') {
+        // Async path: generation was triggered and is running server-side.
+        result.note =
+          `Generation of "${content_type}" was triggered and is now running server-side in ` +
+          `NotebookLM (typically 5–10 min). It is NOT downloaded yet. To retrieve it, poll ` +
+          `download_content (content_type="${content_type}", same notebook_url) every ~60s: it ` +
+          `returns an error while still generating and the file once ready. (list_content does ` +
+          `not yet reliably show artifacts in the current UI — prefer polling download_content.)`;
+        log.success(
+          `✅ [TOOL] generate_content triggered (async — poll download_content to retrieve)`
+        );
+      } else if (result.success) {
         log.success(`✅ [TOOL] generate_content completed`);
       } else {
         log.error(`❌ [TOOL] generate_content failed: ${result.error}`);
