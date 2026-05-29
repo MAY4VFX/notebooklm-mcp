@@ -12,6 +12,8 @@
 import type { Page, Locator, ElementHandle } from 'patchright';
 import path from 'path';
 import { existsSync } from 'fs';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { randomDelay, realisticClick, humanType } from '../utils/stealth-utils.js';
 import { log } from '../utils/logger.js';
 import { CONFIG } from '../config.js';
@@ -20,6 +22,49 @@ import { setLocale, tAll } from '../i18n/index.js';
 
 // Initialize i18n with configured locale
 setLocale(CONFIG.uiLocale);
+
+const execAsync = promisify(exec);
+
+/**
+ * Click a locator using a REAL OS-level X11 event via xdotool, not a CDP
+ * synthetic event. NotebookLM's behavioural bot-detection silently drops the
+ * save-source RPC when the confirm click is a Patchright/CDP "teleport"
+ * (proven: a real VNC mouse click on the very same server browser persists
+ * the source; the identical CDP click does not). xdotool injects a genuine
+ * X11 pointer event into the Xvfb display, indistinguishable from a human.
+ *
+ * Maps the element's viewport coordinates to absolute screen coordinates via
+ * window.screenX/Y + the chrome (toolbar) height, then moves+clicks.
+ * Returns false if anything is unavailable so the caller can fall back.
+ */
+async function xdotoolClickLocator(page: Page, locator: Locator): Promise<boolean> {
+  try {
+    const box = await locator.boundingBox();
+    if (!box) return false;
+    // Window position + chrome height, read from the page itself.
+    const geom = await page.evaluate(() => ({
+      sx: (globalThis as unknown as { screenX: number }).screenX || 0,
+      sy: (globalThis as unknown as { screenY: number }).screenY || 0,
+      outerH: (globalThis as unknown as { outerHeight: number }).outerHeight || 0,
+      innerH: (globalThis as unknown as { innerHeight: number }).innerHeight || 0,
+      dpr: (globalThis as unknown as { devicePixelRatio: number }).devicePixelRatio || 1,
+    }));
+    const chromeH = Math.max(0, geom.outerH - geom.innerH);
+    const screenX = Math.round(geom.sx + (box.x + box.width / 2) * geom.dpr);
+    const screenY = Math.round(geom.sy + chromeH + (box.y + box.height / 2) * geom.dpr);
+    const display = process.env.DISPLAY || ':99';
+    // Move in two hops (gives a tiny trajectory), then click.
+    await execAsync(
+      `DISPLAY=${display} xdotool mousemove ${screenX - 40} ${screenY - 25} ` +
+        `mousemove --sync ${screenX} ${screenY} click 1`
+    );
+    log.info(`  🖱️ xdotool click at screen (${screenX},${screenY})`);
+    return true;
+  } catch (e) {
+    log.warning(`  ⚠️ xdotool click failed: ${e}`);
+    return false;
+  }
+}
 
 /**
  * Build selectors for all supported locales
@@ -1295,34 +1340,20 @@ export class ContentManager {
           const btn = this.page.locator(selector).first();
           if (await btn.isVisible({ timeout: 100 })) {
             log.info(`  ✅ Found enabled confirm button: ${selector}`);
-            // HUMAN-LIKE CLICK. NotebookLM's bot-detection silently rejects the
-            // save-source RPC when the confirm click is a CDP "teleport" with
-            // no preceding pointer trajectory (read ops pass, write ops don't).
-            // Proven: a real VNC mouse click (with movement) on this very same
-            // server browser DOES persist the source. So move the mouse to the
-            // button in steps, hover, small pause, then click — approximating
-            // genuine pointer input so isTrusted+behavioural signals look human.
-            try {
-              const box = await btn.boundingBox();
-              if (box) {
-                const tx = box.x + box.width / 2;
-                const ty = box.y + box.height / 2;
-                // Move in from a nearby offset in several steps (real trajectory).
-                await this.page.mouse.move(tx - 120, ty - 80, { steps: 6 });
-                await randomDelay(120, 240);
-                await this.page.mouse.move(tx, ty, { steps: 12 });
-                await randomDelay(180, 320);
-                await this.page.mouse.down();
-                await randomDelay(40, 90);
-                await this.page.mouse.up();
-                log.info(`  ✅ Clicked confirm button (human-like pointer)`);
-                return;
-              }
-            } catch (e) {
-              log.warning(`  ⚠️ human-like click failed (${e}), falling back to .click()`);
+            // Click via a REAL X11 event (xdotool). NotebookLM's bot-detection
+            // silently rejects the save-source RPC when the confirm click is a
+            // CDP "teleport" (read ops pass, write ops don't). Proven: a real
+            // VNC mouse click on this very same server browser persists the
+            // source; the identical CDP click does not. xdotool injects a
+            // genuine OS-level pointer event into Xvfb.
+            const xok = await xdotoolClickLocator(this.page, btn);
+            if (xok) {
+              log.info(`  ✅ Clicked confirm button (xdotool / real X11 event)`);
+              return;
             }
+            // Fallback to CDP click if xdotool unavailable.
             await btn.click();
-            log.info(`  ✅ Clicked confirm button (fallback)`);
+            log.info(`  ✅ Clicked confirm button (CDP fallback)`);
             return;
           }
         } catch {

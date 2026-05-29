@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y \
     libdbus-1-3 libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 \
     libxfixes3 libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 \
     xvfb x11vnc novnc websockify fluxbox \
+    xdotool \
     fonts-liberation fonts-noto-color-emoji wget ca-certificates procps \
     && rm -rf /var/lib/apt/lists/*
 
