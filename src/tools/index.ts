@@ -3846,15 +3846,31 @@ export class ToolHandlers {
         await sendProgress?.('Navigating to NotebookLM...', 1, 5);
         log.info('  📄 Navigating to NotebookLM homepage...');
 
-        // Navigate to NotebookLM homepage
+        // Navigate to NotebookLM homepage. Use 'domcontentloaded', NOT
+        // 'networkidle': NotebookLM keeps long-poll/streaming connections open
+        // so the network never goes idle, and waitUntil:'networkidle' reliably
+        // times out at 30s (observed: "page.goto: Timeout 30000ms exceeded").
         await page.goto('https://notebooklm.google.com/', {
-          waitUntil: 'networkidle',
+          waitUntil: 'domcontentloaded',
           timeout: 30000,
         });
-        await randomDelay(1500, 2500);
+        // Give the SPA a moment to render the create button after DOM load.
+        await randomDelay(2500, 3500);
 
         await sendProgress?.('Clicking create button...', 2, 5);
         log.info('  🖱️  Looking for Create notebook button...');
+
+        // Wait for the create button to actually render (SPA hydrates after
+        // domcontentloaded). Up to 20s — this is the element we're about to
+        // click, so block on it rather than racing per-selector timeouts.
+        await page
+          .waitForSelector('button.create-new-button, mat-card.create-new-action-button', {
+            state: 'visible',
+            timeout: 20000,
+          })
+          .catch(() =>
+            log.warning('  ⚠️ create button not visible after 20s, trying selectors anyway')
+          );
 
         // Look for the "Create notebook" button. The 2026 NotebookLM home
         // page has two: a tonal button in the top toolbar
@@ -3942,7 +3958,7 @@ export class ToolHandlers {
           /notebooklm\.google\.com\/notebook\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:\b|\/|$)/;
         await page.waitForURL(NOTEBOOK_UUID_URL, { timeout: 30000 });
         // Then wait for the page to settle so the title field is editable.
-        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+        await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
         await randomDelay(1500, 2500);
 
         // Parse the final URL/UUID with the same strict pattern.
