@@ -61,6 +61,24 @@ async function xdotoolClickLocator(page: Page, locator: Locator): Promise<boolea
         `screenXY(${geom.sx},${geom.sy}) outer/inner(${geom.outerH}/${geom.innerH}) dpr=${geom.dpr} → (${screenX},${screenY})`
     );
     // Move in two hops (gives a tiny trajectory), then click.
+    // Verify what element actually sits under the target point (viewport
+    // coords = screen − window origin) so we KNOW whether xdotool will hit
+    // the button or miss it — removes the blind-calibration guesswork.
+    const vx = Math.round((box.x + box.width / 2) * geom.dpr);
+    const vy = Math.round((box.y + box.height / 2) * geom.dpr);
+    const hit = await page.evaluate(
+      ({ x, y }) => {
+        const el = (globalThis as unknown as { document: Document }).document.elementFromPoint(
+          x,
+          y
+        );
+        return el
+          ? `${el.tagName}.${(el.className || '').toString().slice(0, 40)} "${(el.textContent || '').trim().slice(0, 20)}"`
+          : 'null';
+      },
+      { x: vx, y: vy }
+    );
+    log.info(`  🎯 elementFromPoint(${vx},${vy}) = ${hit}`);
     await execAsync(
       `DISPLAY=${display} xdotool mousemove ${screenX - 40} ${screenY - 25} ` +
         `mousemove --sync ${screenX} ${screenY} click 1`
