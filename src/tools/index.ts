@@ -2801,7 +2801,27 @@ export class ToolHandlers {
       let verifiedCount = -1;
       let verified = false;
 
+      // Reliable add path (confirmed in the field): reload the notebook with
+      // ?addSource=true before each attempt. On a freshly-created notebook the
+      // plain URL often lets the upload "succeed" without the source persisting
+      // ("Source not found after upload"); the ?addSource=true reload forces
+      // NotebookLM to (re)initialise the notebook and open the add-source dialog,
+      // after which the add sticks.
+      const addSourceUrl = resolvedNotebookUrl.includes('?')
+        ? resolvedNotebookUrl
+        : `${resolvedNotebookUrl}?addSource=true`;
+      const renavigate = async () => {
+        try {
+          await page.goto(addSourceUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          await new Promise((r) => setTimeout(r, 2500));
+        } catch (navErr) {
+          log.warning(`  ⚠️ add_source re-navigate failed: ${navErr}`);
+        }
+      };
+
       for (let tryNo = 1; tryNo <= MAX_ADD_ATTEMPTS && !verified; tryNo++) {
+        await renavigate();
+
         // Snapshot the source list BEFORE this attempt.
         let baselineCount = -1;
         try {
@@ -2821,11 +2841,7 @@ export class ToolHandlers {
 
         if (!result.success) {
           log.warning(`⚠️ [TOOL] add_source attempt ${tryNo} returned failure: ${result.error}`);
-          // Re-navigate to a clean state before the next attempt.
-          if (tryNo < MAX_ADD_ATTEMPTS) {
-            await new Promise((r) => setTimeout(r, 3000));
-          }
-          continue;
+          continue; // next iteration reloads via ?addSource=true before retrying
         }
 
         // VERIFY: re-read the source list; require the count to grow.
@@ -2847,9 +2863,7 @@ export class ToolHandlers {
           log.warning(
             `⚠️ [TOOL] add_source attempt ${tryNo}: source count did not grow (before=${baselineCount}, after=${verifiedCount}) — retrying`
           );
-          if (tryNo < MAX_ADD_ATTEMPTS) {
-            await new Promise((r) => setTimeout(r, 3000));
-          }
+          // next iteration reloads via ?addSource=true before retrying
         }
       }
 

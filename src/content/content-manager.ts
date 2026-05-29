@@ -3791,20 +3791,6 @@ export class ContentManager {
         await kebab.click();
         await randomDelay(300, 500);
 
-        // DIAGNOSTIC (temporary): dump the ACTUAL menu items so we learn the real
-        // export label/flow for the current UI instead of guessing. Logged as
-        // EXPORT-PROBE; removed once the export path is confirmed.
-        try {
-          const menuItems = await this.page.locator('[role="menuitem"]').allInnerTexts();
-          log.info(
-            `  🔎 EXPORT-PROBE card ${i + 1}/${maxCardsToTry} text="${cardText}" menu=${JSON.stringify(
-              menuItems.map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean)
-            )}`
-          );
-        } catch (probeErr) {
-          log.warning(`  🔎 EXPORT-PROBE failed: ${probeErr}`);
-        }
-
         let pdfItem: ReturnType<typeof this.page.locator> | null = null;
         for (const sel of pdfSelectors) {
           const el = this.page.locator(sel).first();
@@ -3815,8 +3801,17 @@ export class ContentManager {
         }
 
         if (!pdfItem) {
-          log.dim(
-            `    card ${i + 1}/${maxCardsToTry}: not a presentation (no PDF item) — "${cardText}"`
+          // Log the actual menu so we can tell "still generating" from "not a
+          // presentation" — a presentation that's still rendering shows the card
+          // but its PDF/PPTX export items aren't in the menu yet.
+          const menuItems = await this.page
+            .locator('[role="menuitem"]')
+            .allInnerTexts()
+            .catch(() => [] as string[]);
+          log.info(
+            `    card ${i + 1}/${maxCardsToTry}: no PDF export yet — "${cardText}" menu=${JSON.stringify(
+              menuItems.map((t) => t.replace(/\s+/g, ' ').trim()).filter(Boolean)
+            )}`
           );
           await this.page.keyboard.press('Escape').catch(() => undefined);
           await randomDelay(200, 350);
@@ -3843,9 +3838,16 @@ export class ContentManager {
         };
       }
 
+      // Cards exist (cardCount > 0, handled above) but none offered a PDF/PPTX
+      // export. The overwhelmingly common cause is that the presentation is still
+      // generating server-side: the artifact card appears in the library early
+      // (and in content.list) but its "Скачать в формате PDF" item only becomes
+      // available once generation truly finishes (5–10 min). Report this as a
+      // retryable "generating" state rather than a misleading "no presentation".
       return {
         success: false,
-        error: `Checked ${maxCardsToTry} artifact cards; none offered a "Скачать в формате PDF" / "Download as PDF" menu item. No presentation is available to download.`,
+        status: 'generating',
+        error: `Found ${cardCount} artifact card(s) but none offer a PDF/PPTX export yet — the presentation is most likely still generating. Retry content.download in ~60s. (content.list can show the artifact before its export is ready.)`,
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);

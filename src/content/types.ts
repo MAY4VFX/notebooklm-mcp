@@ -268,6 +268,9 @@ export interface ContentDownloadResult {
   googleSlidesUrl?: string;
   /** PDF download URL (for presentation) */
   pdfUrl?: string;
+  /** Readiness when no file was returned: 'generating' = artifact exists but its
+   * export isn't available yet, retry later; 'failed' = a real error. */
+  status?: 'generating' | 'ready' | 'failed';
   error?: string;
 }
 
