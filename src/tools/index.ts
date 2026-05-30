@@ -2801,27 +2801,30 @@ export class ToolHandlers {
       let verifiedCount = -1;
       let verified = false;
 
-      // Reliable add path (confirmed in the field): reload the notebook with
-      // ?addSource=true before each attempt. On a freshly-created notebook the
-      // plain URL often lets the upload "succeed" without the source persisting
-      // ("Source not found after upload"); the ?addSource=true reload forces
-      // NotebookLM to (re)initialise the notebook and open the add-source dialog,
-      // after which the add sticks.
-      const addSourceUrl = resolvedNotebookUrl.includes('?')
+      // Navigate ONCE to the dialog-ready URL so a freshly-created notebook is
+      // materialised on NotebookLM's backend and the add-source dialog is
+      // available, then give it a generous settle. Do NOT reload per attempt —
+      // reloading repeatedly resets the just-created notebook's client state and
+      // the first source never persists (observed live: 3/3 attempts stuck at
+      // 0→0 with per-attempt reload; the simple wait-and-retry succeeds on a
+      // later attempt). Retries below REUSE the same loaded page so the backend
+      // has time to catch up between tries.
+      const addSourceUrl = /[?&]addSource=/.test(resolvedNotebookUrl)
         ? resolvedNotebookUrl
-        : `${resolvedNotebookUrl}?addSource=true`;
-      const renavigate = async () => {
-        try {
+        : resolvedNotebookUrl + (resolvedNotebookUrl.includes('?') ? '&' : '?') + 'addSource=true';
+      try {
+        // Only navigate if the page isn't already on a dialog-ready URL — when the
+        // session was just created on ?addSource=true, reloading it would reset the
+        // fresh notebook's state (the exact failure mode). In that case just settle.
+        if (!/[?&]addSource=/.test(page.url())) {
           await page.goto(addSourceUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-          await new Promise((r) => setTimeout(r, 2500));
-        } catch (navErr) {
-          log.warning(`  ⚠️ add_source re-navigate failed: ${navErr}`);
         }
-      };
+        await new Promise((r) => setTimeout(r, 4000));
+      } catch (navErr) {
+        log.warning(`  ⚠️ add_source initial navigate failed: ${navErr}`);
+      }
 
       for (let tryNo = 1; tryNo <= MAX_ADD_ATTEMPTS && !verified; tryNo++) {
-        await renavigate();
-
         // Snapshot the source list BEFORE this attempt.
         let baselineCount = -1;
         try {
@@ -2841,7 +2844,8 @@ export class ToolHandlers {
 
         if (!result.success) {
           log.warning(`⚠️ [TOOL] add_source attempt ${tryNo} returned failure: ${result.error}`);
-          continue; // next iteration reloads via ?addSource=true before retrying
+          if (tryNo < MAX_ADD_ATTEMPTS) await new Promise((r) => setTimeout(r, 4000));
+          continue;
         }
 
         // VERIFY: re-read the source list; require the count to grow.
@@ -2863,7 +2867,7 @@ export class ToolHandlers {
           log.warning(
             `⚠️ [TOOL] add_source attempt ${tryNo}: source count did not grow (before=${baselineCount}, after=${verifiedCount}) — retrying`
           );
-          // next iteration reloads via ?addSource=true before retrying
+          if (tryNo < MAX_ADD_ATTEMPTS) await new Promise((r) => setTimeout(r, 4000));
         }
       }
 
