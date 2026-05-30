@@ -2364,7 +2364,7 @@ export class ContentManager {
             (await el.getAttribute('class'))?.includes('mdc-tab--active');
 
           if (!isActive) {
-            await el.click();
+            await el.click({ timeout: 2500 });
             await randomDelay(800, 1200);
             log.info(`  ✅ Clicked Studio tab`);
           } else {
@@ -2381,7 +2381,7 @@ export class ContentManager {
     try {
       const tabList = this.page.locator('.mat-mdc-tab-list .mdc-tab').nth(2); // Studio is 3rd tab (0-indexed)
       if (await tabList.isVisible({ timeout: 1000 })) {
-        await tabList.click();
+        await tabList.click({ timeout: 2500 });
         await randomDelay(800, 1200);
         log.info(`  ✅ Studio tab accessed via tab list`);
         return;
@@ -2479,9 +2479,39 @@ export class ContentManager {
   async getContentOverview(): Promise<NotebookContentOverview> {
     log.info(`📋 Getting notebook content overview...`);
 
-    const sources = await this.listSources();
-    const generatedContent = await this.listGeneratedContent();
+    // A notebook opened via ?addSource=true (the URL create returns) leaves the
+    // add-source dialog MODAL open. That modal intercepts every tab click (5s×N
+    // timeouts here, 30s click timeouts in navigateToStudio → minutes of hang)
+    // AND hides the source rows (overview reported 0 sources even when present).
+    // Dismiss any open dialog before reading.
+    try {
+      const openDialog = this.page.locator('[role="dialog"]').first();
+      if (await openDialog.isVisible({ timeout: 800 }).catch(() => false)) {
+        log.info('  ⚠️ Closing open dialog before reading overview...');
+        await this.page.keyboard.press('Escape').catch(() => undefined);
+        await randomDelay(500, 900);
+      }
+    } catch {
+      /* no dialog */
+    }
 
+    // Sources: use the SAME proven reader add_source verifies with
+    // (getAllSourceLabels → getVisibleSourceRows) so overview is consistent with
+    // add_source and skips the slow legacy fallbacks in listSources().
+    let sources: NotebookSource[] = [];
+    try {
+      const labels = await this.getAllSourceLabels();
+      sources = labels.map((name, index) => ({
+        id: `source-${index}`,
+        name,
+        type: 'document',
+        status: 'ready' as const,
+      }));
+    } catch (err) {
+      log.warning(`  ⚠️ Could not read sources for overview: ${err}`);
+    }
+
+    const generatedContent = await this.listGeneratedContent();
     const hasAudioOverview = generatedContent.some((c) => c.type === 'audio_overview');
 
     return {
